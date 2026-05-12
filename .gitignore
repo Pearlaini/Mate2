@@ -1,0 +1,12 @@
+# 로그인·세션 (절대 커밋하지 않음)
+Mate2QA_login.env
+*.env
+storage_state.json
+storage_state_domestic.json
+
+# Python
+__pycache__/
+*.py[cod]
+.Python
+venv/
+.venv/
