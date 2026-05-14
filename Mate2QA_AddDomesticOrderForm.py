@@ -1,3 +1,5 @@
+# 칸다슈 개발사이트
+
 import os
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +24,9 @@ CONFIG = {
     "address_search_keyword": "지플러스타워",
     "headless": False,
     "slow_mo": 150,
+    # Playwright 기본(1280×720)보다 넓게: 자동화 시 표·모달이 가로로 잘리는 현상 완화
+    "viewport_width": 1920,
+    "viewport_height": 1080,
     "selectors": {
         "login_id_input": 'input[name="loginId"]',
         "login_pw_input": 'input[name="password"]',
@@ -51,10 +56,14 @@ def create_context(p, config: Dict):
         slow_mo=config["slow_mo"],
     )
 
+    vw = int(config.get("viewport_width", 1920))
+    vh = int(config.get("viewport_height", 1080))
+    ctx_kw: Dict = {"viewport": {"width": vw, "height": vh}}
+
     if STATE_FILE.exists():
-        context = browser.new_context(storage_state=str(STATE_FILE))
-    else:
-        context = browser.new_context()
+        ctx_kw["storage_state"] = str(STATE_FILE)
+
+    context = browser.new_context(**ctx_kw)
 
     return browser, context
 
