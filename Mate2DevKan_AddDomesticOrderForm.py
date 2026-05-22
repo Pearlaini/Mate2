@@ -1,12 +1,17 @@
 # 칸다슈 개발사이트
 
-import os
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Union
 
-from dotenv import load_dotenv
 from playwright.sync_api import Frame, Page, sync_playwright, TimeoutError as PlaywrightTimeoutError
+
+from Mate2QA_login import (
+    create_context,
+    ensure_login_only,
+    first_visible_locator,
+    load_env_credentials,
+)
 
 
 # =========================
@@ -36,131 +41,6 @@ CONFIG = {
 
 # 해외용 storage_state.json과 덮어쓰기 충돌을 피합니다.
 STATE_FILE = Path("storage_state_domestic.json")
-
-
-def load_env_credentials() -> Dict[str, str]:
-    """환경변수에서 로그인 정보를 읽습니다."""
-    load_dotenv("Mate2QA_login.env")
-    user_id = os.getenv("ID", "").strip()
-    user_pw = os.getenv("PW", "").strip()
-
-    if not user_id or not user_pw:
-        raise ValueError("`Mate2QA_login.env`에 ID, PW를 설정해 주세요.")
-    return {"id": user_id, "pw": user_pw}
-
-
-def create_context(p, config: Dict):
-    """저장된 세션이 있으면 재사용하고, 없으면 새 컨텍스트를 만듭니다."""
-    browser = p.chromium.launch(
-        headless=config["headless"],
-        slow_mo=config["slow_mo"],
-    )
-
-    vw = int(config.get("viewport_width", 1920))
-    vh = int(config.get("viewport_height", 1080))
-    ctx_kw: Dict = {"viewport": {"width": vw, "height": vh}}
-
-    if STATE_FILE.exists():
-        ctx_kw["storage_state"] = str(STATE_FILE)
-
-    context = browser.new_context(**ctx_kw)
-
-    return browser, context
-
-
-def is_login_page(page, login_url: str) -> bool:
-    """현재 페이지가 로그인 페이지인지 확인합니다."""
-    current = page.url.lower()
-    return "login.do" in current
-
-
-def first_visible_locator(page, candidates):
-    """후보 셀렉터 중 화면에 보이는 첫 요소를 찾습니다."""
-    for sel in candidates:
-        loc = page.locator(sel).first
-        if loc.count() > 0 and loc.is_visible():
-            return loc, sel
-    return None, None
-
-
-def do_login(page, config: Dict, creds: Dict[str, str]):
-    """로그인을 수행합니다."""
-    page.goto(config["login_url"], wait_until="domcontentloaded")
-    page.wait_for_timeout(1000)
-
-    print(f"[디버그] 현재 URL: {page.url}")
-    print(f"[디버그] 페이지 제목: {page.title()}")
-
-    id_candidates = [
-        'input[name="loginId"]',
-        'input[name="id"]',
-        'input[name="userId"]',
-        'input[id="loginId"]',
-        'input[id="id"]',
-        'input[type="text"]',
-    ]
-    pw_candidates = [
-        'input[name="password"]',
-        'input[name="pw"]',
-        'input[id="password"]',
-        'input[id="pw"]',
-        'input[type="password"]',
-    ]
-    btn_candidates = [
-        'button:has-text("로그인")',
-        'input[type="submit"]',
-        'button[type="submit"]',
-        '.btn_login',
-    ]
-
-    id_loc, id_sel = first_visible_locator(page, id_candidates)
-    pw_loc, pw_sel = first_visible_locator(page, pw_candidates)
-    btn_loc, btn_sel = first_visible_locator(page, btn_candidates)
-
-    if not id_loc or not pw_loc or not btn_loc:
-        raise ValueError(
-            f"로그인 요소를 찾지 못했습니다. id={id_sel}, pw={pw_sel}, btn={btn_sel}. "
-            "F12로 실제 input/button selector를 확인해 주세요."
-        )
-
-    print(f"[디버그] ID 셀렉터: {id_sel}")
-    print(f"[디버그] PW 셀렉터: {pw_sel}")
-    print(f"[디버그] BTN 셀렉터: {btn_sel}")
-
-    id_loc.fill(creds["id"])
-    pw_loc.fill(creds["pw"])
-    btn_loc.click()
-    handle_duplicate_login_popup(page)
-    page.wait_for_load_state("networkidle")
-
-
-def handle_duplicate_login_popup(page):
-    """중복 로그인 팝업이 뜨면 확인 버튼을 눌러 로그인 진행을 계속합니다."""
-    popup = page.locator(".swal2-popup.swal2-show")
-    try:
-        popup.first.wait_for(state="visible", timeout=3000)
-    except PlaywrightTimeoutError:
-        return
-
-    title = popup.locator("#swal2-title")
-    if title.count() > 0 and "중복 로그인" in title.first.inner_text():
-        confirm_btn = popup.locator("button.swal2-confirm.swal2-styled").first
-        confirm_btn.click()
-        page.wait_for_timeout(800)
-        print("[안내] 중복 로그인 팝업에서 '확인'을 클릭했습니다.")
-
-
-def ensure_login_only(page, context, config: Dict, creds: Dict[str, str]):
-    """주문 페이지 없이 로그인 상태만 확인/보장합니다."""
-    page.goto(config["login_url"], wait_until="domcontentloaded")
-
-    if is_login_page(page, config["login_url"]):
-        print("[안내] 로그인되지 않은 상태입니다. 자동 로그인합니다.")
-        do_login(page, config, creds)
-        context.storage_state(path=str(STATE_FILE))
-        print("[안내] 로그인 완료, 세션을 storage_state_domestic.json에 저장했습니다.")
-    else:
-        print(f"[안내] 이미 로그인되어 있습니다. 현재 URL: {page.url}")
 
 
 def select_company_value(page):
@@ -545,21 +425,117 @@ def _submit_address_keyword(root: Union[Page, Frame], keyword: str) -> None:
     print("[안내] 주소 검색(btn_search) 클릭 완료")
 
 
+def _wait_domestic_base_address_filled(page: Page, timeout_ms: int = 8000) -> None:
+    """주소 팝업 선택 후 우편·기본주소(readonly)가 채워졌는지 확인합니다."""
+    # 사이트별로 우편번호·기본주소 name이 달라서, addr/zip/post 계열 값을 통합 검사합니다.
+    js_collect_address_values = """() => {
+        const include = /(addr|zip|post)/i;
+        const exclude = /(detail|msg|message|search|region)/i;
+        const elements = Array.from(
+            document.querySelectorAll('input, textarea, select')
+        );
+        return elements
+            .map((el) => {
+                const key = `${el.name || ''} ${el.id || ''}`.trim();
+                const value = String(el.value || '').trim();
+                return { key, value };
+            })
+            .filter((item) => item.key && include.test(item.key))
+            .filter((item) => !exclude.test(item.key))
+            .filter((item) => item.value);
+    }"""
+
+    try:
+        page.wait_for_function(
+            """() => {
+                const include = /(addr|zip|post)/i;
+                const exclude = /(detail|msg|message|search|region)/i;
+                const elements = Array.from(
+                    document.querySelectorAll('input, textarea, select')
+                );
+                return elements
+                    .map((el) => {
+                        const key = `${el.name || ''} ${el.id || ''}`.trim();
+                        const value = String(el.value || '').trim();
+                        return { key, value };
+                    })
+                    .filter((item) => item.key && include.test(item.key))
+                    .filter((item) => !exclude.test(item.key))
+                    .filter((item) => item.value)
+                    .length > 0;
+            }""",
+            timeout=timeout_ms,
+        )
+        values = page.evaluate(js_collect_address_values)
+    except PlaywrightTimeoutError as exc:
+        debug_values = page.evaluate(
+            """() => Array.from(document.querySelectorAll('input, textarea, select'))
+                .map((el) => ({
+                    key: `${el.name || ''} ${el.id || ''}`.trim(),
+                    value: String(el.value || '').trim()
+                }))
+                .filter((item) => item.key && /(addr|zip|post)/i.test(item.key))
+                .slice(0, 20)"""
+        )
+        print(f"[디버그] 주소 관련 필드 후보: {debug_values}")
+        raise ValueError(
+            "주소 검색 결과를 클릭했지만 우편번호·기본주소 반영을 확인하지 못했습니다. "
+            "화면의 배송지 우편번호·기본주소 필드 name/id를 확인해 주세요."
+        ) from exc
+
+    first = values[0]
+    safe_key = str(first.get("key", "")).encode("cp949", errors="replace").decode("cp949")
+    safe_value = str(first.get("value", "")).encode("cp949", errors="replace").decode("cp949")
+    print(f"[안내] 주소 선택 반영 확인: {safe_key}='{safe_value[:60]}'")
+
+
 def _click_first_address_search_result(root: Union[Page, Frame]) -> None:
-    """검색 결과 목록의 첫 번째 항목을 클릭합니다."""
-    _root_wait_ms(root, 1500)
-    row_selectors = [
-        "table tbody tr",
-        "ul li",
-        ".list_addr li",
+    """
+    검색 결과 목록의 첫 번째 항목을 클릭합니다.
+    Daum 우편번호 팝업: ul.list_post > li.list_post_item > button.link_post
+    (지번 결과는 ul.list_addr / li.list_addr_item 동일 패턴)
+    """
+    result_container_selectors = [
+        "ul.list_post",
+        "ul.list_addr",
     ]
-    for sel in row_selectors:
+    for container_sel in result_container_selectors:
+        try:
+            root.locator(container_sel).first.wait_for(
+                state="visible", timeout=5000
+            )
+            break
+        except PlaywrightTimeoutError:
+            continue
+    else:
+        _root_wait_ms(root, 1500)
+
+    # F12 기준: 실제 선택은 li가 아니라 button.link_post
+    click_selectors = [
+        "ul.list_post li.list_post_item button.link_post",
+        "li.list_post_item button.link_post",
+        "ul.list_post button.link_post",
+        "ul.list_addr li.list_addr_item button.link_post",
+        "li.list_addr_item button.link_post",
+        "ul.list_addr button.link_post",
+        "ul.list_post li.list_post_item",
+        "ul.list_addr li.list_addr_item",
+    ]
+    for sel in click_selectors:
         loc = root.locator(sel).first
         try:
-            if loc.count() > 0 and loc.is_visible():
-                loc.click(timeout=8000)
-                print(f"[안내] 주소 검색 첫 번째 결과 클릭 (selector: {sel})")
-                return
+            if loc.count() == 0 or not loc.is_visible():
+                continue
+            loc.click(timeout=8000)
+            addr_span = loc.locator("span.txt_addr").first
+            if addr_span.count() > 0:
+                text = (addr_span.inner_text(timeout=2000) or "").strip()[:80]
+            else:
+                text = (loc.inner_text(timeout=2000) or "").strip()[:80]
+            print(
+                f"[안내] 주소 검색 첫 번째 결과 클릭 (selector: {sel}, text: {text!r})"
+            )
+            return
         except PlaywrightTimeoutError:
             continue
     raise ValueError("주소 검색 결과에서 첫 번째 항목을 클릭하지 못했습니다.")
@@ -597,8 +573,9 @@ def fill_domestic_delivery_address_via_popup(
 
     _submit_address_keyword(root, keyword)
     _click_first_address_search_result(root)
+    _wait_domestic_base_address_filled(page)
 
-    page.wait_for_timeout(500)
+    page.wait_for_timeout(300)
 
     detail = f"주소{stamp_yymmddhhmm}"
     fill_field(page, "dlvr_detail_addr", detail, required=False)
@@ -742,11 +719,11 @@ def run():
     print(f"[안내] 시간값 MMDDHHMM: {stamp_mmddhhmm}")
 
     with sync_playwright() as p:
-        browser, context = create_context(p, CONFIG)
+        browser, context = create_context(p, CONFIG, state_file=STATE_FILE)
         page = context.new_page()
 
         try:
-            ensure_login_only(page, context, CONFIG, creds)
+            ensure_login_only(page, context, CONFIG, creds, state_file=STATE_FILE)
             open_domestic_order_register_page(page, CONFIG)
             select_domestic_sach_cd(page, CONFIG["sach_cd_value"])
             search_product_in_popup(page, CONFIG["sample_product_cd"])

@@ -3,6 +3,7 @@ Mate2QA_login.env
 *.env
 storage_state.json
 storage_state_domestic.json
+search_filter_domestic.json
 
 # Python
 __pycache__/

@@ -244,11 +244,11 @@ def select_dropdown_value(page, field_name: str, target_label: str):
 
 
 def select_order_form_values(page):
-    """주문 등록 페이지에서 국가/채널 값을 선택합니다."""
+    """주문 등록 페이지에서 판매 국가, 판매채널 값을 선택합니다."""
     page.wait_for_timeout(1000)
     select_dropdown_value(page, "sach_country_cd", "일본")
     page.wait_for_timeout(300)
-    select_dropdown_value(page, "sach_cd", "칸닷슈 - 광동")
+    select_dropdown_value(page, "sach_cd", "j해외b2c")
 
 
 def search_product_in_popup(page, product_code: str):
