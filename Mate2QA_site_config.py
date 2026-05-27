@@ -23,6 +23,8 @@ _ENV_PATH = Path(__file__).resolve().parent / "Mate2QA_login.env"
 # =========================
 # 로그인 페이지 URL만 바꾸면, 아래 경로가 같은 서버에 붙습니다.
 # (또는 Mate2QA_login.env에 LOGIN_URL=... 설정)
+# "https://qa-oms.ourbox.co.kr/om/login/login.do"
+# "https://dev-kdash-oms.shopeasy.co.kr:8443/om/login/login.do"#
 # =========================
 
 _DEFAULT_LOGIN_URL = "https://qa-oms.ourbox.co.kr/om/login/login.do"

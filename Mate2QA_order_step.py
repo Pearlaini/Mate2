@@ -5,7 +5,10 @@ from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 from Mate2QA_login import first_visible_locator
 from Mate2QA_site_config import ORDER_LIST_URL, get_put_order_list_url
 
-ROW_CHECKBOX = 'input[type="checkbox"][aria-label="Select Row"]'
+ROW_CHECKBOX = (
+    '.tabulator-row input[type="checkbox"][aria-label="Select Row"], '
+    '.tabulator-row input[type="checkbox"]'
+)
 NEXT_STEP_BTN = 'button:has-text("다음 단계")'
 MENU_SELECT = "#select_od_confirm"
 

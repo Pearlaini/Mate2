@@ -86,7 +86,8 @@ def capture_selected_order_snos(page: Page) -> List[str]:
             const out = [];
             const seen = new Set();
             const boxes = document.querySelectorAll(
-                'input[type="checkbox"][aria-label="Select Row"]:checked'
+                '.tabulator-row input[type="checkbox"][aria-label="Select Row"]:checked, '
+                + '.tabulator-row input[type="checkbox"]:checked'
             );
             for (const cb of boxes) {
                 const row = cb.closest('.tabulator-row');
@@ -207,8 +208,14 @@ def click_search_button(page: Page) -> None:
     print("[안내] 「검색」 버튼을 클릭했습니다.")
 
 
-HEADER_SELECT_ALL = 'div.tabulator-col-title input[type="checkbox"]'
-ROW_CHECKBOX = 'input[type="checkbox"][aria-label="Select Row"]'
+HEADER_SELECT_ALL = (
+    '.tabulator-header input[type="checkbox"], '
+    'div.tabulator-col-title input[type="checkbox"]'
+)
+ROW_CHECKBOX = (
+    '.tabulator-row input[type="checkbox"][aria-label="Select Row"], '
+    '.tabulator-row input[type="checkbox"]'
+)
 
 
 def click_select_all_orders(page: Page) -> None:
@@ -227,7 +234,7 @@ def click_select_all_orders(page: Page) -> None:
         header_cb.wait_for(state="visible", timeout=10_000)
     except PlaywrightTimeoutError as e:
         raise ValueError(
-            "전체 선택 체크박스(div.tabulator-col-title input)를 찾지 못했습니다."
+            "전체 선택 체크박스(.tabulator-header input)를 찾지 못했습니다."
         ) from e
 
     if not header_cb.is_checked():
@@ -237,7 +244,8 @@ def click_select_all_orders(page: Page) -> None:
             page.evaluate(
                 """() => {
                     const el = document.querySelector(
-                        'div.tabulator-col-title input[type="checkbox"]'
+                        '.tabulator-header input[type="checkbox"], '
+                        + 'div.tabulator-col-title input[type="checkbox"]'
                     );
                     if (el && !el.checked) el.click();
                 }"""
@@ -247,6 +255,14 @@ def click_select_all_orders(page: Page) -> None:
     rows = page.locator(ROW_CHECKBOX)
     total = rows.count()
     checked = sum(1 for i in range(total) if rows.nth(i).is_checked())
+    if checked == 0 and total > 0:
+        print("[경고] 헤더 전체 선택이 반영되지 않아 행 체크박스를 직접 선택합니다.")
+        for i in range(total):
+            cb = rows.nth(i)
+            if not cb.is_checked():
+                cb.click(force=True)
+        page.wait_for_timeout(300)
+        checked = sum(1 for i in range(total) if rows.nth(i).is_checked())
     print(f"[안내] 검색 후 전체 선택 완료 ({checked}/{total}건).")
 
 
@@ -259,7 +275,24 @@ def apply_criteria_and_search(
     click_search_button(page)
     wait_search_grid(page)
     if select_all_after:
-        click_select_all_orders(page)
+        last_error: Exception | None = None
+        for attempt in range(1, 4):
+            try:
+                click_select_all_orders(page)
+                return
+            except ValueError as exc:
+                last_error = exc
+                if attempt == 3:
+                    break
+                print(
+                    "[경고] 검색 결과 전체 선택을 아직 못했습니다. "
+                    f"{attempt}/3 재검색 후 다시 시도합니다."
+                )
+                page.wait_for_timeout(1500 * attempt)
+                click_search_button(page)
+                wait_search_grid(page, timeout_ms=45_000)
+        if last_error:
+            raise last_error
 
 
 def _print_criteria_summary(criteria: Dict[str, str], *, prefix: str = "") -> None:
