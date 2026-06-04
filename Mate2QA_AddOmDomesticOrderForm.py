@@ -30,6 +30,7 @@ CONFIG = {
     "address_search_keyword": "지플러스타워",
     "headless": False,
     "slow_mo": 150,
+    "page_zoom": 1.0,
     # Playwright 기본(1280×720)보다 넓게: 자동화 시 표·모달이 가로로 잘리는 현상 완화
     "viewport_width": 1920,
     "viewport_height": 1080,
@@ -455,11 +456,10 @@ def _wait_domestic_base_address_filled(page: Page, timeout_ms: int = 8000) -> No
                     document.querySelectorAll('input, textarea, select')
                 );
                 return elements
-                    .map((el) => {
-                        const key = `${el.name || ''} ${el.id || ''}`.trim();
-                        const value = String(el.value || '').trim();
-                        return { key, value };
-                    })
+                    .map((el) => ({
+                        key: `${el.name || ''} ${el.id || ''}`.trim(),
+                        value: String(el.value || '').trim(),
+                    }))
                     .filter((item) => item.key && include.test(item.key))
                     .filter((item) => !exclude.test(item.key))
                     .filter((item) => item.value)

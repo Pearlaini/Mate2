@@ -36,6 +36,10 @@ ORDER_LIST_PATH = "/om/order/order/orderList.do"
 PUT_ORDER_LIST_PATH = "/om/order/putOrder/putOrderList.do"
 OUT_READY_LIST_PATH = "/om/order/outReady/outReadyList.do"
 ORDER_REGISTER_PATH = "/om/order/order/orderRgst.do"
+OUT_EXPECT_LIST_PATH = "/wm/out/reg/outExpectList.do"
+OUT_WAVE_LIST_PATH = "/wm/out/wave/outWaveList.do"
+OUT_ALLOC_RGST_PATH = "/wm/out/alloc/outAllocRgst.do"
+OUT_WK_ORD_LIST_PATH = "/wm/out/wk/ord/outWkOrdList.do"
 STATE_FILE_DOMESTIC = Path("storage_state_domestic.json")
 
 
@@ -124,6 +128,26 @@ def get_order_register_url(login_url: str = LOGIN_URL) -> str:
     return join_origin_path(login_url, ORDER_REGISTER_PATH)
 
 
+def get_out_expect_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, OUT_EXPECT_LIST_PATH)
+
+
+def get_out_wave_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, OUT_WAVE_LIST_PATH)
+
+
+def get_out_alloc_rgst_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, OUT_ALLOC_RGST_PATH)
+
+
+def get_out_wk_ord_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, OUT_WK_ORD_LIST_PATH)
+
+
 
 
 
@@ -143,6 +167,14 @@ def build_playwright_config() -> Dict:
 
         "order_register_url": get_order_register_url(),
 
+        "out_expect_list_url": get_out_expect_list_url(),
+
+        "out_wave_list_url": get_out_wave_list_url(),
+
+        "out_alloc_rgst_url": get_out_alloc_rgst_url(),
+
+        "out_wk_ord_list_url": get_out_wk_ord_list_url(),
+
         "headless": False,
 
         "slow_mo": 150,
@@ -151,11 +183,16 @@ def build_playwright_config() -> Dict:
 
         "viewport_height": 1080,
 
+        # 브라우저 창: 최대화 + 페이지 줌(0.8 = 80%, 화면 잘림 완화)
+        "start_maximized": True,
+
+        "page_zoom": 0.8,
+
         "selectors": {
 
-            "login_id_input": 'input[name="loginId"]',
+            "login_id_input": 'input[name="user_id"]',
 
-            "login_pw_input": 'input[name="password"]',
+            "login_pw_input": 'input[name="user_pwd"]',
 
             "login_button": 'button:has-text("로그인")',
 
@@ -187,6 +224,10 @@ def print_site_url_banner() -> None:
     print(f"[현재] 주문목록:   {cfg['order_list_url']}")
     print(f"[현재] 주문서처리: {cfg['put_order_list_url']}")
     print(f"[현재] 출고준비:   {cfg['out_ready_list_url']}")
+    print(f"[현재] 출고예정:   {cfg['out_expect_list_url']}")
+    print(f"[현재] WAVE목록:   {cfg['out_wave_list_url']}")
+    print(f"[현재] 출고차수:   {cfg['out_alloc_rgst_url']}")
+    print(f"[현재] 출고작업:   {cfg['out_wk_ord_list_url']}")
     print("=" * 62)
 
 
