@@ -2,7 +2,7 @@
 #
 # 1) 로그인 상태 확인
 # 2) 출고작업 목록 이동
-# 3) 사용자가 입력한 출고차수명으로 검색
+# 3) 검색구분=출고차수 + 출고차수 번호 검색·행 선택
 # 4) 출고지시 탭에서 박스추천 실행
 # 5) 다음 단계 > 전체 다음단계 실행 후 alert OK 자동 클릭
 # 6) 피킹지시 탭 클릭
@@ -18,43 +18,262 @@ from Mate2QA_login import (
     ensure_login_only,
     load_env_credentials,
 )
-from Mate2QA_order_step import click_popup_ok_if_visible
-from Mate2QA_site_config import CONFIG, STATE_FILE_DOMESTIC, print_site_url_banner
+from Mate2QA_order_step import (
+    OUT_WK_ORD_PROCESSING_ERROR,
+    abort_popup_on_messages,
+    click_popup_ok_if_visible,
+)
+from Mate2QA_order_search import click_search_button, wait_order_search_form
+from Mate2QA_site_config import (
+    CONFIG,
+    STATE_FILE_DOMESTIC,
+    join_origin_path,
+    print_site_url_banner,
+    refresh_config_from_env,
+)
 from Mate2QA_wm_wave_search import (
     ALERT_OK_POLICY,
     click_all_picking_instrt,
     click_box_recommend_dropdown,
     click_out_wk_ord_instruction_tab,
     click_out_wk_ord_next_step_dropdown,
-    click_total_box_recommend,
-    search_out_wk_ord_by_tseq_nm,
-    select_out_wk_ord_row_by_tseq_nm,
+    click_out_wk_ord_search_button,
+    wait_out_wk_ord_main_grid,
+    wait_out_wk_ord_tab4_rows,
 )
 
 STATE_FILE = STATE_FILE_DOMESTIC
-OUT_WK_ORD_LIST_URL = "https://qa-oms.ourbox.co.kr/wm/out/wk/ord/outWkOrdList.do"
-SACH_STOCK_LIST_URL = "https://qa-oms.ourbox.co.kr/wm/stock/sach/sachList.do"
+ORDER_MANAGE_LIST_PATH = "/om/order/manage/manageList.do"
+TOTAL_GROUP_BOX_MODAL = "#totalGroupBoxModal.show, #totalGroupBoxModal.in"
 
 
 def goto_out_wk_ord_list(page: Page, config: Dict) -> None:
     """WMS 출고작업 목록 화면으로 이동합니다."""
-    url = config.get("out_wk_ord_list_url") or OUT_WK_ORD_LIST_URL
+    url = config["out_wk_ord_list_url"]
     page.goto(url, wait_until="domcontentloaded")
     page.locator("#srch_gubun").wait_for(state="visible", timeout=15_000)
     page.wait_for_timeout(500)
-    print(f"[안내] WMS 출고작업 목록으로 이동했습니다. 현재 URL: {page.url}")
 
 
-def input_out_tseq_nm() -> str:
-    """사용자에게 출고차수명을 직접 입력받습니다."""
+def select_out_tseq_search_column(page: Page) -> None:
+    """출고작업 검색구분을 「출고차수」로 선택합니다."""
+    page.locator("#srch_gubun").wait_for(state="visible", timeout=10_000)
+    page.select_option("#srch_gubun", value="out_tseq")
+    page.wait_for_timeout(300)
+
+
+def input_out_tseq_sno() -> str:
+    """사용자에게 출고차수 번호를 입력받습니다."""
     try:
-        out_tseq_nm = input("출고차수명을 입력해 주세요: ").strip()
+        out_tseq_sno = input("출고차수 번호를 입력해 주세요: ").strip()
     except EOFError as exc:
-        raise ValueError("출고차수명을 입력받지 못했습니다.") from exc
+        raise ValueError("출고차수 번호를 입력받지 못했습니다.") from exc
 
-    if not out_tseq_nm:
-        raise ValueError("출고차수명이 비어 있습니다. 출고차수명을 입력해 주세요.")
-    return out_tseq_nm
+    if not out_tseq_sno:
+        raise ValueError("출고차수 번호가 비어 있습니다. 출고차수 번호를 입력해 주세요.")
+    return out_tseq_sno
+
+
+def fill_out_wk_ord_tseq_sno(page: Page, out_tseq_sno: str) -> None:
+    """출고작업 화면: 검색구분=출고차수 + #srch_txt에 번호 입력."""
+    select_out_tseq_search_column(page)
+    txt = page.locator("#srch_txt").first
+    txt.wait_for(state="visible", timeout=10_000)
+    txt.evaluate(
+        """(el, v) => {
+            el.value = v || '';
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            el.blur();
+        }""",
+        out_tseq_sno,
+    )
+
+
+def search_and_select_out_tseq(page: Page, out_tseq_sno: str) -> None:
+    """출고차수 번호로 검색한 뒤 해당 행을 선택합니다."""
+    fill_out_wk_ord_tseq_sno(page, out_tseq_sno)
+    click_out_wk_ord_search_button(page)
+    wait_out_wk_ord_main_grid(page)
+    click_out_wk_ord_row_by_sno(page, out_tseq_sno)
+
+
+def click_out_wk_ord_row_by_sno(page: Page, out_tseq_sno: str) -> None:
+    """출고차수(out_alloc_tseq_sno)가 일치하는 행을 클릭합니다."""
+    target = (out_tseq_sno or "").strip()
+    if not target:
+        raise ValueError("선택할 출고차수(out_alloc_tseq_sno)가 비어 있습니다.")
+
+    result = page.evaluate(
+        """(sno) => {
+            const grid = document.querySelector('#grid-table');
+            if (!grid) return { found: false, tseq_sno: '' };
+            for (const row of grid.querySelectorAll('.tabulator-row')) {
+                const field = row.querySelector('[tabulator-field="out_alloc_tseq_sno"]');
+                const text = field ? (field.innerText || '').trim() : '';
+                if (text !== sno) continue;
+
+                row.scrollIntoView({ block: 'center', inline: 'nearest' });
+                row.click();
+
+                const hidden = document.querySelector('#selected_out_alloc_tseq_sno');
+                let tseq_sno = hidden ? (hidden.value || '').trim() : '';
+                if (!tseq_sno) tseq_sno = text;
+                return { found: true, tseq_sno };
+            }
+            return { found: false, tseq_sno: '' };
+        }""",
+        target,
+    )
+    page.wait_for_timeout(800)
+
+    if not result.get("found"):
+        raise ValueError(f"출고작업 목록에서 출고차수 '{target}' 행을 찾지 못했습니다.")
+
+    page.locator("#out_exec_view").wait_for(state="visible", timeout=15_000)
+    tseq_sno = str(result.get("tseq_sno") or target).strip()
+
+
+def _dismiss_box_recommend_alerts(page: Page, *, max_attempts: int = 2) -> None:
+    """박스추천 완료 alert OK를 최대 max_attempts회까지 클릭합니다."""
+    for attempt in range(1, max_attempts + 1):
+        timeout_ms = 15_000 if attempt == 1 else 5_000
+        if not click_popup_ok_if_visible(page, timeout_ms=timeout_ms):
+            if attempt == 1:
+                pass
+            break
+        page.wait_for_timeout(500)
+
+
+def _select_boxes_in_group_box_modal(page: Page) -> None:
+    """박스추천 모달에서 추천 박스를 선택합니다."""
+    result = page.evaluate(
+        """() => {
+            const modal = document.querySelector('#totalGroupBoxModal');
+            if (!modal) return { selected: false, reason: 'modal_not_found' };
+
+            const isVisible = (el) => {
+                if (!el) return false;
+                const style = window.getComputedStyle(el);
+                const rect = el.getBoundingClientRect();
+                return style.display !== 'none'
+                    && style.visibility !== 'hidden'
+                    && rect.width > 0
+                    && rect.height > 0;
+            };
+
+            const radios = Array.from(
+                modal.querySelectorAll('input[type="radio"]')
+            ).filter(isVisible);
+            if (radios.length > 0) {
+                const target = radios.find((r) => !r.checked) || radios[0];
+                target.click();
+                return { selected: true, method: 'radio', count: radios.length };
+            }
+
+            const header = Array.from(
+                modal.querySelectorAll(
+                    '.tabulator-header input[type="checkbox"], '
+                    + 'div.tabulator-col-title input[type="checkbox"]'
+                )
+            ).find(isVisible);
+            if (header && !header.checked) {
+                header.click();
+                return { selected: true, method: 'header_checkbox' };
+            }
+
+            const rowCbs = Array.from(
+                modal.querySelectorAll('.tabulator-row input[type="checkbox"]')
+            ).filter(isVisible);
+            if (rowCbs.length > 0) {
+                for (const cb of rowCbs) {
+                    if (!cb.checked) cb.click();
+                }
+                const checked = rowCbs.filter((cb) => cb.checked).length;
+                return {
+                    selected: checked > 0,
+                    method: 'row_checkbox',
+                    count: rowCbs.length,
+                    checked,
+                };
+            }
+
+            const firstRow = Array.from(
+                modal.querySelectorAll('.tabulator-row')
+            ).find(isVisible);
+            if (firstRow) {
+                firstRow.click();
+                return { selected: true, method: 'row_click' };
+            }
+
+            return { selected: false, reason: 'no_selectable_element' };
+        }"""
+    )
+    if not result.get("selected"):
+        raise ValueError(
+            "박스추천 모달에서 선택 가능한 박스를 찾지 못했습니다. "
+            f"reason={result.get('reason')}"
+        )
+
+
+def _ensure_box_recommend_modal_closed(page: Page) -> None:
+    """박스추천 모달이 남아 있으면 미완료로 보고 중단합니다."""
+    modal = page.locator(TOTAL_GROUP_BOX_MODAL).first
+    if modal.count() > 0 and modal.is_visible():
+        raise ValueError(
+            "박스추천이 완료되지 않았습니다. "
+            "박스추천 모달(#totalGroupBoxModal)이 아직 열려 있습니다."
+        )
+
+
+def _close_total_group_box_modal_if_open(page: Page) -> None:
+    """열려 있는 박스추천 모달을 닫습니다."""
+    modal = page.locator(TOTAL_GROUP_BOX_MODAL).first
+    if modal.count() == 0 or not modal.is_visible():
+        return
+    try:
+        modal.wait_for(state="hidden", timeout=15_000)
+    except PlaywrightTimeoutError:
+        close_btn = page.locator(
+            '#totalGroupBoxModal button:has-text("닫기"), #totalGroupBoxModal .close'
+        ).first
+        if close_btn.count() and close_btn.is_visible():
+            close_btn.click()
+            page.wait_for_timeout(500)
+
+
+def run_total_box_recommend(page: Page) -> None:
+    """전체박스 추천 실행 — 박스 선택 팝업 유무에 따라 분기 처리합니다."""
+    menu = page.locator("#totalBoxRecommendBtn").first
+    menu.wait_for(state="visible", timeout=10_000)
+    menu.click()
+    page.wait_for_timeout(800)
+
+    modal = page.locator(TOTAL_GROUP_BOX_MODAL).first
+    try:
+        modal.wait_for(state="visible", timeout=5_000)
+    except PlaywrightTimeoutError:
+        _dismiss_box_recommend_alerts(page, max_attempts=2)
+        page.wait_for_timeout(1000)
+        return
+
+    _select_boxes_in_group_box_modal(page)
+    page.wait_for_timeout(300)
+
+    confirm = page.locator("#totalGroupBoxConfirmBtn").first
+    confirm.wait_for(state="visible", timeout=10_000)
+    confirm.click()
+    page.wait_for_timeout(800)
+
+    if click_popup_ok_if_visible(page, timeout_ms=3_000):
+        _select_boxes_in_group_box_modal(page)
+        page.wait_for_timeout(300)
+        confirm.click()
+        page.wait_for_timeout(800)
+
+    _dismiss_box_recommend_alerts(page, max_attempts=2)
+    _close_total_group_box_modal_if_open(page)
+    _ensure_box_recommend_modal_closed(page)
 
 
 @contextmanager
@@ -71,20 +290,34 @@ def auto_ok_for_all_next_step() -> Iterator[None]:
 def run_box_recommend_and_move_next(page: Page) -> None:
     """출고지시 탭에서 박스추천 후 전체 다음단계까지 이동합니다."""
     click_box_recommend_dropdown(page)
-    click_total_box_recommend(page)
-    click_out_wk_ord_next_step_dropdown(page)
-    with auto_ok_for_all_next_step():
-        click_all_picking_instrt(page)
-    page.wait_for_timeout(1000)
-    print("[안내] 박스추천 후 「전체 다음단계」 alert OK까지 처리했습니다.")
+    with abort_popup_on_messages(OUT_WK_ORD_PROCESSING_ERROR):
+        run_total_box_recommend(page)
+    _ensure_box_recommend_modal_closed(page)
+    page.wait_for_timeout(2000)
+    with abort_popup_on_messages(OUT_WK_ORD_PROCESSING_ERROR):
+        click_out_wk_ord_next_step_dropdown(page)
+        with auto_ok_for_all_next_step():
+            click_all_picking_instrt(page)
+        for attempt in range(1, 4):
+            timeout_ms = 10_000 if attempt == 1 else 5_000
+            if not click_popup_ok_if_visible(page, timeout_ms=timeout_ms):
+                break
+            page.wait_for_timeout(500)
+    page.wait_for_timeout(2000)
 
 
 def click_alert_ok_before_picking_tab(page: Page) -> None:
-    """피킹지시 탭 클릭 전에 추가로 뜨는 alert OK를 클릭합니다."""
-    if click_popup_ok_if_visible(page, timeout_ms=10_000):
-        print("[안내] 피킹지시 탭 클릭 전 추가 alert OK를 클릭했습니다.")
-    else:
-        print("[안내] 피킹지시 탭 클릭 전 추가 alert이 없어 계속 진행합니다.")
+    """피킹지시 탭 클릭 전에 남아 있는 alert OK를 모두 클릭합니다."""
+    clicked_any = False
+    for attempt in range(1, 4):
+        if not click_popup_ok_if_visible(page, timeout_ms=5_000):
+            break
+        clicked_any = True
+        page.wait_for_timeout(500)
+    if not clicked_any:
+
+
+        pass
 
 
 def click_picking_instruction_tab(page: Page) -> None:
@@ -111,7 +344,13 @@ def click_picking_instruction_tab(page: Page) -> None:
         tseq_sno,
     )
     page.wait_for_timeout(1000)
-    print(f"[안내] 「피킹지시」 탭 클릭 완료. out_alloc_tseq_sno={tseq_sno}")
+    row_count = wait_out_wk_ord_tab4_rows(page, timeout_ms=30_000)
+    if row_count == 0:
+        raise ValueError(
+            "피킹지시 탭에 데이터가 없습니다. "
+            "출고지시에서 「전체 다음단계」 이동이 완료되지 않았을 수 있습니다. "
+            "박스추천·alert 메시지를 화면에서 확인해 주세요."
+        )
 
 
 def click_product_picking_list(page: Page) -> None:
@@ -120,17 +359,14 @@ def click_product_picking_list(page: Page) -> None:
     picking_btn.wait_for(state="visible", timeout=10_000)
     picking_btn.click()
     page.wait_for_timeout(400)
-    print("[안내] 「피킹 리스트」(#picking_btn_06) 버튼 클릭.")
 
     product_btn = page.locator("#sel_picking_list_by_prod_pick").first
     product_btn.wait_for(state="visible", timeout=10_000)
     product_btn.click()
     page.wait_for_timeout(800)
-    print("[안내] 「상품별」(#sel_picking_list_by_prod_pick) 버튼 클릭.")
 
     if not click_popup_ok_if_visible(page, timeout_ms=15_000):
         raise ValueError("피킹 리스트 상품별 alert에서 OK/확인 버튼을 찾지 못했습니다.")
-    print("[안내] 피킹 리스트 상품별 alert OK를 클릭했습니다.")
 
 
 def select_all_out_confirm_rows(page: Page) -> None:
@@ -185,10 +421,6 @@ def select_all_out_confirm_rows(page: Page) -> None:
             "출고확정 탭에서 전체 checkbox를 찾지 못했습니다. "
             f"reason={result.get('reason')}"
         )
-    print(
-        "[안내] 출고확정 전체 checkbox 선택 완료 "
-        f"({int(result.get('checked') or 0)}/{int(result.get('total') or 0)}건)."
-    )
 
 
 def click_confirm_product_picking_list(page: Page) -> None:
@@ -199,17 +431,14 @@ def click_confirm_product_picking_list(page: Page) -> None:
     picking_btn.wait_for(state="visible", timeout=10_000)
     picking_btn.click()
     page.wait_for_timeout(400)
-    print("[안내] 출고확정 「피킹 리스트」(#picking_btn_08) 버튼 클릭.")
 
     product_btn = page.locator("#sel_picking_list_by_prod_confrm").first
     product_btn.wait_for(state="visible", timeout=10_000)
     product_btn.click()
     page.wait_for_timeout(800)
-    print("[안내] 출고확정 「상품별」(#sel_picking_list_by_prod_confrm) 버튼 클릭.")
 
     if not click_popup_ok_if_visible(page, timeout_ms=15_000):
         raise ValueError("출고확정 피킹 리스트 상품별 alert에서 OK/확인 버튼을 찾지 못했습니다.")
-    print("[안내] 출고확정 피킹 리스트 상품별 alert OK를 클릭했습니다.")
 
 
 def click_picking_next_step_to_packing(page: Page) -> None:
@@ -260,20 +489,21 @@ def click_picking_next_step_to_packing(page: Page) -> None:
             f"「다음 단계」 버튼을 찾지 못했습니다. reason={clicked.get('reason')}"
         )
     page.wait_for_timeout(400)
-    print("[안내] 피킹지시 「다음 단계」 버튼 클릭.")
 
     all_next_btn = page.locator("#all_packing_instrt").first
     all_next_btn.wait_for(state="visible", timeout=10_000)
     all_next_btn.click()
     page.wait_for_timeout(800)
-    print("[안내] 피킹지시 「전체 다음단계」(#all_packing_instrt) 클릭.")
 
     for attempt in range(1, 3):
-        if not click_popup_ok_if_visible(page, timeout_ms=15_000):
-            raise ValueError(
-                f"피킹지시 전체 다음단계 alert OK {attempt}회차를 찾지 못했습니다."
-            )
-        print(f"[안내] 피킹지시 전체 다음단계 alert OK {attempt}회차 클릭.")
+        timeout_ms = 15_000 if attempt == 1 else 5_000
+        if not click_popup_ok_if_visible(page, timeout_ms=timeout_ms):
+            if attempt == 1:
+                raise ValueError(
+                    "피킹지시 전체 다음단계 alert OK 1회차를 찾지 못했습니다."
+                )
+            break
+        page.wait_for_timeout(500)
 
 
 def click_packing_instruction_tab(page: Page) -> None:
@@ -282,7 +512,6 @@ def click_packing_instruction_tab(page: Page) -> None:
     packing_tab.wait_for(state="visible", timeout=10_000)
     packing_tab.click()
     page.wait_for_timeout(1000)
-    print("[안내] 「포장지시」(#packing_tab) 탭 클릭 완료.")
 
 
 def click_packing_next_step_all(page: Page) -> None:
@@ -342,14 +571,16 @@ def click_packing_next_step_all(page: Page) -> None:
             f"reason={result.get('reason')}"
         )
     page.wait_for_timeout(800)
-    print("[안내] 포장지시 「다음 단계 > 전체 다음단계」 클릭.")
 
     for attempt in range(1, 3):
-        if not click_popup_ok_if_visible(page, timeout_ms=15_000):
-            raise ValueError(
-                f"포장지시 전체 다음단계 alert OK {attempt}회차를 찾지 못했습니다."
-            )
-        print(f"[안내] 포장지시 전체 다음단계 alert OK {attempt}회차 클릭.")
+        timeout_ms = 15_000 if attempt == 1 else 5_000
+        if not click_popup_ok_if_visible(page, timeout_ms=timeout_ms):
+            if attempt == 1:
+                raise ValueError(
+                    "포장지시 전체 다음단계 alert OK 1회차를 찾지 못했습니다."
+                )
+            break
+        page.wait_for_timeout(500)
 
 
 def click_out_confirm_tab(page: Page) -> None:
@@ -376,16 +607,14 @@ def click_out_confirm_tab(page: Page) -> None:
         tseq_sno,
     )
     page.wait_for_timeout(1000)
-    print(f"[안내] 「출고확정」 탭 클릭 완료. out_alloc_tseq_sno={tseq_sno}")
 
 
-def open_sach_stock_tab(context) -> Page:
+def open_sach_stock_tab(context, config: Dict) -> Page:
     """새 탭에서 화주별 재고 페이지를 엽니다."""
     stock_page = context.new_page()
-    stock_page.goto(SACH_STOCK_LIST_URL, wait_until="domcontentloaded")
+    stock_page.goto(config["sach_stock_list_url"], wait_until="domcontentloaded")
     stock_page.locator("#searchColumn2").wait_for(state="visible", timeout=15_000)
     stock_page.wait_for_timeout(500)
-    print(f"[안내] 새 탭에서 화주별 재고 페이지를 열었습니다. 현재 URL: {stock_page.url}")
     return stock_page
 
 
@@ -393,37 +622,60 @@ def select_stock_search_column_product_code(page: Page) -> None:
     """화주별 재고 검색조건을 상품코드로 선택합니다."""
     page.select_option("#searchColumn2", value="prod_cd")
     page.wait_for_timeout(300)
-    print("[안내] 화주별 재고 검색조건을 상품코드(prod_cd)로 선택했습니다.")
+
+
+def open_order_manage_tab(context, config: Dict) -> Page:
+    """새 탭에서 주문관리 목록 페이지를 엽니다."""
+    manage_page = context.new_page()
+    url = join_origin_path(config["login_url"], ORDER_MANAGE_LIST_PATH)
+    manage_page.goto(url, wait_until="domcontentloaded")
+    wait_order_search_form(manage_page)
+    manage_page.wait_for_timeout(500)
+    return manage_page
+
+
+def search_order_by_mall_od_no(page: Page, search_text: str) -> None:
+    """검색조건을 주문번호로 선택하고 검색어를 입력한 뒤 검색합니다."""
+    page.select_option("#searchColumn", value="mall_od_no")
+    page.wait_for_timeout(300)
+
+    txt_loc = page.locator('input[name="searchTxt"], #searchTxt').first
+    txt_loc.wait_for(state="visible", timeout=10_000)
+    txt_loc.fill(search_text)
+    page.wait_for_timeout(300)
+
+    click_search_button(page)
 
 
 def run() -> None:
     """로그인 확인 → 출고작업 검색 → 박스추천 → 포장지시 탭 이동."""
     print_site_url_banner()
-    creds = load_env_credentials()
+    config = refresh_config_from_env(CONFIG)
+    creds = load_env_credentials(config["login_url"])
 
     with sync_playwright() as p:
-        browser, context = create_context(p, CONFIG, state_file=STATE_FILE)
+        browser, context = create_context(p, config, state_file=STATE_FILE)
         page = context.new_page()
 
         try:
-            ensure_login_only(page, context, CONFIG, creds, state_file=STATE_FILE)
-            goto_out_wk_ord_list(page, CONFIG)
+            config = ensure_login_only(page, context, config, creds, state_file=STATE_FILE)
+            goto_out_wk_ord_list(page, config)
 
-            out_tseq_nm = input_out_tseq_nm()
-            print(f"[안내] 입력한 출고차수명: {out_tseq_nm}")
-
-            search_out_wk_ord_by_tseq_nm(page, out_tseq_nm)
-            select_out_wk_ord_row_by_tseq_nm(page, out_tseq_nm)
+            out_tseq_sno = input_out_tseq_sno()
+            search_and_select_out_tseq(page, out_tseq_sno)
             click_out_wk_ord_instruction_tab(page)
-            run_box_recommend_and_move_next(page)
-            click_alert_ok_before_picking_tab(page)
-            click_picking_instruction_tab(page)
-            click_picking_next_step_to_packing(page)
-            click_packing_instruction_tab(page)
-            click_packing_next_step_all(page)
+            with abort_popup_on_messages(OUT_WK_ORD_PROCESSING_ERROR):
+                run_box_recommend_and_move_next(page)
+                click_alert_ok_before_picking_tab(page)
+                click_picking_instruction_tab(page)
+                click_picking_next_step_to_packing(page)
+                click_packing_instruction_tab(page)
+                click_packing_next_step_all(page)
             click_out_confirm_tab(page)
-            stock_page = open_sach_stock_tab(context)
+            stock_page = open_sach_stock_tab(context, config)
             select_stock_search_column_product_code(stock_page)
+            manage_page = open_order_manage_tab(context, config)
+            search_order_by_mall_od_no(manage_page, "J")
             page.bring_to_front()
             page.wait_for_timeout(500)
             click_out_confirm_tab(page)
@@ -432,9 +684,8 @@ def run() -> None:
             try:
                 input("출고확정/재고/피킹 리스트 확인 후 종료하려면 Enter를 누르세요...")
             except EOFError:
-                print("[안내] 표준 입력이 없어 Enter 대기를 건너뜁니다.")
+                pass
         except PlaywrightTimeoutError:
-            print("[오류] 페이지 로딩이 지연되었습니다. URL/네트워크/selector를 확인해 주세요.")
             raise
         finally:
             context.storage_state(path=str(STATE_FILE))

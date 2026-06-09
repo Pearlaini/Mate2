@@ -20,7 +20,7 @@ from Mate2QA_order_search import (
 from Mate2QA_order_step import click_next_step_by_selection, goto_put_order_list
 from Mate2QA_out_ready import run_out_ready_wms_flow
 from Mate2QA_sender import register_sender_for_selected_orders
-from Mate2QA_site_config import CONFIG, STATE_FILE_DOMESTIC, print_site_url_banner
+from Mate2QA_site_config import CONFIG, STATE_FILE_DOMESTIC, print_site_url_banner, refresh_config_from_env
 
 STATE_FILE = STATE_FILE_DOMESTIC
 
@@ -29,30 +29,28 @@ def goto_order_list(page, config: Dict):
     """국내 주문목록 화면으로 이동합니다."""
     page.goto(config["order_list_url"], wait_until="domcontentloaded")
     page.wait_for_timeout(1000)
-    print(f"[안내] 국내 주문목록으로 이동했습니다. 현재 URL: {page.url}")
 
 
 def run():
     """로그인 → 주문 이동·발송인 등록 → 출고준비 WMS 출고 등록까지 자동화."""
     print_site_url_banner()
-    creds = load_env_credentials()
+    config = refresh_config_from_env(CONFIG)
+    creds = load_env_credentials(config["login_url"])
 
     with sync_playwright() as p:
-        browser, context = create_context(p, CONFIG, state_file=STATE_FILE)
+        browser, context = create_context(p, config, state_file=STATE_FILE)
         page = context.new_page()
 
         try:
-            ensure_login_only(page, context, CONFIG, creds, state_file=STATE_FILE)
-            goto_order_list(page, CONFIG)
+            config = ensure_login_only(page, context, config, creds, state_file=STATE_FILE)
+            goto_order_list(page, config)
 
-            print(
-                "[안내] 주문목록: 검색 6개 설정 → 「검색」 → "
-                "이동할 주문 체크까지 모두 끝낸 뒤 Enter..."
-            )
             try:
                 input("준비되면 Enter...")
             except EOFError:
-                print("[안내] 표준 입력 없음 — 현재 화면 기준으로 진행합니다.")
+
+
+                pass
 
             filter_data = save_search_criteria_from_page(page)
             click_next_step_by_selection(page)
@@ -65,13 +63,11 @@ def run():
 
             try:
                 input(
-                    "발송인 등록·출고준비 WMS 출고 등록까지 완료했습니다. "
-                    "화면 확인 후 종료하려면 Enter..."
+                    "alert OK 확인 후 종료하려면 Enter..."
                 )
             except EOFError:
-                print("[안내] 표준 입력이 없어 Enter 대기를 건너뜁니다.")
+                pass
         except PlaywrightTimeoutError:
-            print("[오류] 페이지 로딩이 지연되었습니다. URL/네트워크/selector를 확인해 주세요.")
             raise
         finally:
             context.storage_state(path=str(STATE_FILE))

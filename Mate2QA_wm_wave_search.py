@@ -3,7 +3,6 @@
 import json
 import time
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
@@ -12,7 +11,9 @@ from Mate2QA_login import first_visible_locator
 from Mate2QA_order_search import capture_selected_order_snos, click_select_all_orders
 from Mate2QA_order_step import click_popup_ok_if_visible
 
-SEARCH_FILTER_FILE = Path(__file__).resolve().parent / "search_filter_wm_wave.json"
+from Mate2QA_site_config import SEARCH_FILTER_WM_WAVE_FILE
+
+SEARCH_FILTER_FILE = SEARCH_FILTER_WM_WAVE_FILE
 
 DEFAULT_WAVE_PROCESS: Dict[str, str] = {
     "id": "selBoxPackBtn",
@@ -136,7 +137,6 @@ def _handle_alert_ok_by_policy(
 ) -> bool:
     """단계별 설정에 따라 alert OK를 자동 클릭하거나 수동 확인으로 남깁니다."""
     if not ALERT_OK_POLICY.get(policy_key, False):
-        print(f"[안내] {label}: 설정상 alert OK는 누르지 않습니다.")
         return False
 
     clicked = False
@@ -145,12 +145,11 @@ def _handle_alert_ok_by_policy(
         if not click_popup_ok_if_visible(page, wait_ms):
             break
         clicked = True
-        print(f"[안내] {label} alert OK 클릭.")
 
     if required and not clicked:
         raise ValueError(f"{label} alert에서 OK 버튼을 찾지 못했습니다.")
     if not clicked:
-        print(f"[안내] {label}: 표시된 alert OK가 없어 자동 클릭을 건너뜁니다.")
+        pass
     return clicked
 
 
@@ -178,7 +177,6 @@ def resolve_out_tseq_nm() -> str:
     data = load_wm_wave_filter() or {}
     data["out_tseq_nm"] = value
     save_wm_wave_filter(data)
-    print(f"[안내] 입력한 출고차수명을 JSON에 저장했습니다: {value}")
     return value
 
 
@@ -194,7 +192,6 @@ def save_wm_wave_filter(data: Dict[str, Any]) -> None:
     """WMS 웨이브 검색·선택 정보를 JSON에 저장합니다."""
     with SEARCH_FILTER_FILE.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    print(f"[안내] WMS 검색 조건을 {SEARCH_FILTER_FILE}에 저장했습니다.")
 
 
 def _set_input_value(page: Page, selector: str, value: str) -> None:
@@ -225,15 +222,8 @@ def capture_wm_wave_filter_from_page(page: Page) -> Dict[str, Any]:
     }
     data = _merge_preserved_filter_fields(data)
     save_wm_wave_filter(data)
-    print(
-        f"[안내] 날짜={data['search_date_range'] or '(없음)'} "
-        f"채널={data['sach_cd'] or '(전체)'} "
-        f"컬럼={data['search_column'] or '(없음)'} "
-        f"검색어={data['srch_txt'] or '(없음)'} "
-        f"선택={len(data['selected_od_snos'])}건"
-    )
     if data["selected_od_snos"]:
-        print(f"[안내] 선택 od_sno: {';'.join(data['selected_od_snos'])}")
+        pass
     else:
         print("[경고] 체크된 주문이 없습니다. WAVE 처리 전에 주문을 선택해 주세요.")
     return data
@@ -262,10 +252,6 @@ def fill_wm_wave_search(page: Page, filter_data: Dict[str, Any]) -> None:
     if search_column:
         page.select_option("#searchColumn", value=search_column)
     _set_input_value(page, "#srch_txt", srch_txt)
-    print(
-        f"[안내] 검색 컬럼={search_column or '(미설정)'}, "
-        f"검색어={srch_txt or '(없음)'}"
-    )
 
 
 def click_wm_search_button(page: Page) -> None:
@@ -275,7 +261,6 @@ def click_wm_search_button(page: Page) -> None:
     btn.click()
     page.wait_for_load_state("domcontentloaded")
     page.wait_for_timeout(800)
-    print("[안내] 「검색」 버튼을 클릭했습니다.")
 
 
 def wait_wm_search_grid(page: Page, timeout_ms: int = 30_000) -> None:
@@ -325,7 +310,6 @@ def select_orders_by_od_sno(page: Page, od_snos: List[str]) -> None:
             f"웨이브 목록에서 od_sno {len(missing)}건을 찾지 못했습니다: "
             f"{';'.join(missing)}"
         )
-    print(f"[안내] 웨이브 그리드에서 od_sno {len(found)}건 선택 완료: {';'.join(found)}")
 
 
 def capture_wave_selected_row_context(
@@ -355,10 +339,6 @@ def capture_wave_selected_row_context(
     data["out_div_cd"] = str(ctx.get("out_div_cd") or "").strip()
     data["dlvr_div_cd_nm"] = str(ctx.get("dlvr_div_cd_nm") or "").strip()
     save_wm_wave_filter(data)
-    print(
-        f"[안내] 웨이브 선택 행 기억: out_div_cd={data['out_div_cd'] or '(없음)'}, "
-        f"dlvr_div_cd_nm={data['dlvr_div_cd_nm'] or '(없음)'}"
-    )
     return data
 
 
@@ -374,7 +354,6 @@ def _set_out_div_cd_on_alloc(page: Page, filter_data: Dict[str, Any]) -> None:
         return
     out_sel = page.locator("#out_div_cd").first
     if out_sel.count() == 0:
-        print(f"[경고] #out_div_cd 요소가 없습니다. out_div_cd={out_div}")
         return
     out_value = OUT_DIV_CD_BY_LABEL.get(out_div)
     if out_value:
@@ -382,7 +361,6 @@ def _set_out_div_cd_on_alloc(page: Page, filter_data: Dict[str, Any]) -> None:
     else:
         page.select_option("#out_div_cd", label=out_div)
     page.wait_for_timeout(500)
-    print(f"[안내] #out_div_cd={out_div} 선택.")
 
 
 def _wait_dlvr_div_cd_options(page: Page, timeout_ms: int = 10_000) -> None:
@@ -400,12 +378,10 @@ def apply_dlvr_div_or_exp_type(page: Page, filter_data: Dict[str, Any]) -> None:
     if not dlvr_nm:
         page.locator("#exp_type").wait_for(state="visible", timeout=10_000)
         page.select_option("#exp_type", value=EXP_TYPE_DIRECT)
-        print("[안내] 배송구분 없음 → #exp_type=직배(00) 선택.")
         return
 
     dlvr_sel = page.locator("#dlvr_div_cd").first
     if dlvr_sel.count() == 0:
-        print(f"[경고] #dlvr_div_cd 요소가 없습니다. dlvr_div_cd_nm={dlvr_nm}")
         return
 
     try:
@@ -424,13 +400,10 @@ def apply_dlvr_div_or_exp_type(page: Page, filter_data: Dict[str, Any]) -> None:
     try:
         if dlvr_value:
             dlvr_sel.select_option(value=dlvr_value)
-            print(f"[안내] #dlvr_div_cd={dlvr_nm}({dlvr_value}) 선택.")
         else:
             dlvr_sel.select_option(label=dlvr_nm)
-            print(f"[안내] #dlvr_div_cd 라벨={dlvr_nm} 선택.")
     except PlaywrightTimeoutError:
         dlvr_sel.select_option(label=dlvr_nm)
-        print(f"[안내] #dlvr_div_cd 라벨={dlvr_nm} 선택(라벨 fallback).")
 
 
 def apply_wm_wave_search(
@@ -453,7 +426,6 @@ def apply_wm_wave_search(
         try:
             wait_wm_search_grid(page)
         except PlaywrightTimeoutError:
-            print("[경고] 검색 결과 그리드가 비어 있거나 로딩이 지연되었습니다.")
             return
     if select_orders:
         select_orders_by_od_sno(page, data.get("selected_od_snos") or [])
@@ -560,21 +532,11 @@ def run_wave_process_on_expect_list(
     _install_wave_process_click_listener(page)
 
     wait_sec = wait_ms / 1000
-    print(
-        f"[안내] WAVE 선택 팝업: {wait_sec:g}초 동안 원하는 항목을 직접 클릭하세요.\n"
-        "       (화주 합포장/주문번호/자사몰주문번호/낱개/삽입/삽입낱개 등)\n"
-        f"       {wait_sec:g}초 안에 클릭하지 않으면 「{DEFAULT_WAVE_PROCESS['label']}」을 자동 클릭합니다."
-    )
 
     user_choice = _wait_for_user_wave_process_choice(page, wait_ms)
 
     if user_choice:
         data = _save_wave_process_choice(filter_data, user_choice)
-        print(
-            f"[안내] 사용자 선택을 기억했습니다: "
-            f"{user_choice.get('label') or user_choice['id']} "
-            f"(id={user_choice['id']}, type={user_choice.get('data_type')})"
-        )
     else:
         default_choice = dict(DEFAULT_WAVE_PROCESS)
         box_btn = page.locator("#selBoxPackBtn").first
@@ -585,10 +547,6 @@ def run_wave_process_on_expect_list(
             )
         box_btn.click()
         data = _save_wave_process_choice(filter_data, default_choice)
-        print(
-            f"[안내] {wait_sec:g}초 동안 선택 없음 → "
-            f"「{default_choice['label']}」(#selBoxPackBtn) 자동 클릭."
-        )
 
     page.wait_for_timeout(500)
     _handle_alert_ok_by_policy(
@@ -600,7 +558,6 @@ def run_wave_process_on_expect_list(
     )
     page.wait_for_load_state("domcontentloaded")
     page.wait_for_timeout(1000)
-    print(f"[안내] WAVE 처리 완료. 현재 URL: {page.url}")
     return data
 
 
@@ -614,7 +571,6 @@ def click_address_refine(page: Page) -> None:
     dropdown, dropdown_sel = first_visible_locator(page, dropdown_candidates)
     if not dropdown:
         raise ValueError("「주소 정제」 드롭다운 버튼을 찾지 못했습니다.")
-    print(f"[안내] 주소 정제 드롭다운 클릭. (selector: {dropdown_sel})")
     dropdown.click()
     page.wait_for_timeout(500)
 
@@ -622,7 +578,6 @@ def click_address_refine(page: Page) -> None:
     refine_btn.wait_for(state="visible", timeout=10_000)
     refine_btn.click()
     page.wait_for_timeout(500)
-    print("[안내] 「주소 정제」 메뉴(#selectAddrRefineBtn) 클릭.")
 
     _handle_alert_ok_by_policy(
         page,
@@ -652,7 +607,6 @@ def click_out_alloc_assign(page: Page, alloc_url: str) -> None:
     if "outAllocRgst.do" not in page.url and alloc_url not in page.url:
         page.goto(alloc_url, wait_until="domcontentloaded")
         page.wait_for_timeout(800)
-    print(f"[안내] 출고차수할당 화면으로 이동했습니다. 현재 URL: {page.url}")
 
 
 def _resolve_alloc_search(filter_data: Dict[str, Any]) -> tuple[str, str]:
@@ -687,35 +641,29 @@ def fill_out_alloc_rgst_form(page: Page, filter_data: Dict[str, Any]) -> None:
     _set_input_value(page, "#out_tseq_nm", out_tseq_nm)
     filter_data["out_tseq_nm"] = out_tseq_nm
     save_wm_wave_filter(filter_data)
-    print(f"[안내] 출고차수명=#out_tseq_nm value={out_tseq_nm} (JSON 저장)")
 
     page.locator("#dist_packing_cd").wait_for(state="visible", timeout=10_000)
     dist_value, dist_label = _resolve_dist_packing_cd(filter_data)
     page.select_option("#dist_packing_cd", value=dist_value)
     wave = filter_data.get("wave_process") or {}
     wave_label = (wave.get("label") or wave.get("id") or "화주 합포장 기준").strip()
-    print(f"[안내] WAVE={wave_label} → 분류설비={dist_label} 선택.")
 
     apply_dlvr_div_or_exp_type(page, filter_data)
 
     date_range = filter_data.get("search_date_range", "")
     if date_range:
         _set_input_value(page, "#searchDateRange", date_range)
-        print(f"[안내] 할당 화면 날짜={date_range}")
 
     alloc_kwd, srch_txt = _resolve_alloc_search(filter_data)
     if alloc_kwd:
         page.select_option("#alloc_kwd", value=alloc_kwd)
-        print(f"[안내] 할당 검색 컬럼=#alloc_kwd value={alloc_kwd}")
     elif (filter_data.get("search_column") or "").strip():
-        print(
-            f"[경고] alloc_kwd에 매핑되지 않는 search_column="
-            f"{filter_data.get('search_column')}, 컬럼 선택을 건너뜁니다."
-        )
+
+
+        pass
 
     if srch_txt:
         used_sel = _fill_alloc_search_text(page, srch_txt)
-        print(f"[안내] 할당 검색어={used_sel} value={srch_txt}")
 
     click_wm_search_button(page)
 
@@ -724,7 +672,6 @@ def select_all_alloc_rgst_targets(page: Page) -> None:
     """출고할당 대상 그리드 맨 앞 헤더 체크박스로 검색 결과 전체 선택."""
     wait_wm_search_grid(page)
     click_select_all_orders(page)
-    print("[안내] 출고할당 대상 검색 결과 전체 선택 완료.")
 
 
 def click_out_alloc_rgst_button(page: Page) -> None:
@@ -733,7 +680,6 @@ def click_out_alloc_rgst_button(page: Page) -> None:
     btn.wait_for(state="visible", timeout=10_000)
     btn.click()
     page.wait_for_timeout(800)
-    print("[안내] 「출고차수 할당」(#outAllocBtn) 클릭.")
     _handle_alert_ok_by_policy(
         page,
         "out_alloc_rgst",
@@ -752,10 +698,6 @@ def fill_out_wk_ord_tseq_nm(page: Page, out_tseq_nm: str) -> None:
     page.locator("#srch_gubun").wait_for(state="visible", timeout=10_000)
     page.select_option("#srch_gubun", value="out_tseq_nm")
     _set_input_value(page, "#srch_txt", out_tseq_nm)
-    print(
-        f"[안내] 출고작업 검색: #srch_gubun=out_tseq_nm, "
-        f"#srch_txt={out_tseq_nm}"
-    )
 
 
 def click_out_wk_ord_search_button(page: Page) -> None:
@@ -765,7 +707,6 @@ def click_out_wk_ord_search_button(page: Page) -> None:
     btn.click()
     page.wait_for_load_state("domcontentloaded")
     page.wait_for_timeout(800)
-    print("[안내] 출고작업 「검색」 버튼을 클릭했습니다.")
 
 
 def wait_out_wk_ord_main_grid(page: Page, timeout_ms: int = 30_000) -> None:
@@ -831,10 +772,6 @@ def select_out_wk_ord_row_by_tseq_nm(page: Page, out_tseq_nm: str) -> None:
     page.locator("#out_exec_view").wait_for(state="visible", timeout=15_000)
 
     tseq_sno = str(result.get("tseq_sno") or "").strip()
-    print(
-        f"[안내] 출고차수명={target} 행 선택 완료"
-        + (f" (out_alloc_tseq_sno={tseq_sno})" if tseq_sno else "")
-    )
 
 
 def _wait_out_wk_ord_tab3_rows(page: Page, timeout_ms: int = 60_000) -> int:
@@ -850,6 +787,29 @@ def _wait_out_wk_ord_tab3_rows(page: Page, timeout_ms: int = 60_000) -> int:
     raise PlaywrightTimeoutError(
         f"출고지시 그리드(#grid-table-tab3) 행이 {timeout_ms}ms 안에 나타나지 않았습니다."
     )
+
+
+def wait_out_wk_ord_tab4_rows(page: Page, timeout_ms: int = 60_000) -> int:
+    """피킹지시(#grid-table-tab4) 그리드 행 수를 대기·반환합니다. 없으면 0."""
+    deadline = time.time() + timeout_ms / 1000
+    while time.time() < deadline:
+        count = page.evaluate(
+            """() => {
+                const selectors = [
+                    '#grid-table-tab4 .tabulator-row',
+                    '#tab_borders_icons-4 .tabulator-row',
+                ];
+                for (const sel of selectors) {
+                    const n = document.querySelectorAll(sel).length;
+                    if (n > 0) return n;
+                }
+                return 0;
+            }"""
+        )
+        if count and count > 0:
+            return int(count)
+        page.wait_for_timeout(500)
+    return 0
 
 
 def click_out_wk_ord_instruction_tab(page: Page) -> None:
@@ -877,10 +837,6 @@ def click_out_wk_ord_instruction_tab(page: Page) -> None:
     )
     page.wait_for_timeout(1000)
     row_count = _wait_out_wk_ord_tab3_rows(page)
-    print(
-        f"[안내] 「출고지시」 탭 로드 완료 "
-        f"(out_alloc_tseq_sno={tseq_sno}, #grid-table-tab3 행 {row_count}건)."
-    )
 
 
 def click_box_recommend_dropdown(page: Page) -> None:
@@ -889,22 +845,24 @@ def click_box_recommend_dropdown(page: Page) -> None:
     btn.wait_for(state="visible", timeout=10_000)
     btn.click()
     page.wait_for_timeout(400)
-    print("[안내] 「박스추천」(#boxRecommandBtn) 드롭다운 클릭.")
 
 
-def click_total_box_recommend(page: Page) -> None:
-    """박스추천 메뉴 「전체박스 추천 실행」(#totalBoxRecommendBtn)을 클릭합니다."""
+def click_total_box_recommend_btn(page: Page) -> None:
+    """박스추천 메뉴 「전체박스 추천 실행」(#totalBoxRecommendBtn) 버튼만 클릭합니다."""
     menu = page.locator("#totalBoxRecommendBtn").first
     menu.wait_for(state="visible", timeout=10_000)
     menu.click()
     page.wait_for_timeout(800)
-    print("[안내] 「전체박스 추천 실행」(#totalBoxRecommendBtn) 클릭.")
+
+
+def click_total_box_recommend(page: Page) -> None:
+    """박스추천 메뉴 「전체박스 추천 실행」 클릭 후 모달·alert까지 처리합니다."""
+    click_total_box_recommend_btn(page)
 
     modal = page.locator("#totalGroupBoxModal.show, #totalGroupBoxModal.in").first
     try:
         modal.wait_for(state="visible", timeout=10_000)
     except PlaywrightTimeoutError:
-        print("[안내] 박스추천 모달이 없습니다.")
         _handle_alert_ok_by_policy(
             page,
             "box_recommend",
@@ -917,9 +875,6 @@ def click_total_box_recommend(page: Page) -> None:
     confirm.wait_for(state="visible", timeout=10_000)
     confirm.click()
     page.wait_for_timeout(800)
-    print(
-        "[안내] 박스추천 모달 「박스추천 실행」(#totalGroupBoxConfirmBtn) 클릭."
-    )
     _handle_alert_ok_by_policy(
         page,
         "box_recommend",
@@ -937,7 +892,6 @@ def click_total_box_recommend(page: Page) -> None:
         if close_btn.count() and close_btn.is_visible():
             close_btn.click()
             page.wait_for_timeout(500)
-            print("[안내] 박스추천 모달 닫기.")
 
 
 def click_out_wk_ord_next_step_dropdown(page: Page) -> None:
@@ -952,7 +906,6 @@ def click_out_wk_ord_next_step_dropdown(page: Page) -> None:
         raise ValueError("「다음 단계」 드롭다운 버튼을 찾지 못했습니다.")
     btn.click()
     page.wait_for_timeout(400)
-    print(f"[안내] 「다음 단계」 드롭다운 클릭. (selector: {sel})")
 
 
 def click_all_picking_instrt(page: Page) -> None:
@@ -961,12 +914,12 @@ def click_all_picking_instrt(page: Page) -> None:
     menu.wait_for(state="visible", timeout=10_000)
     menu.click()
     page.wait_for_timeout(800)
-    print("[안내] 「전체 다음단계」(#all_picking_instrt) 클릭.")
     _handle_alert_ok_by_policy(
         page,
         "all_picking_instrt",
         "전체 다음단계",
-        timeout_ms=10_000,
+        timeout_ms=15_000,
+        max_attempts=3,
     )
 
 
@@ -974,9 +927,6 @@ def run_out_wk_ord_box_recommend_and_next_step(page: Page) -> None:
     """출고지시: 박스추천 → 전체박스 추천 → 다음 단계 → 전체 다음단계."""
     click_box_recommend_dropdown(page)
     click_total_box_recommend(page)
+    page.wait_for_timeout(2000)
     click_out_wk_ord_next_step_dropdown(page)
     click_all_picking_instrt(page)
-    print(
-        "[안내] 박스추천·전체 다음단계 클릭 완료. "
-        "alert OK 처리는 ALERT_OK_POLICY 설정을 따릅니다."
-    )

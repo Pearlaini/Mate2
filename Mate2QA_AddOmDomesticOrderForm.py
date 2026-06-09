@@ -6,15 +6,19 @@ from typing import Dict, Union
 from playwright.sync_api import Frame, Page, sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 from Mate2QA_login import (
+    _is_ably_login_url,
     create_context,
     ensure_login_only,
     first_visible_locator,
     load_env_credentials,
+    popup_page_zoom,
 )
+from Mate2QA_order_search import load_search_filter, select_shipper_if_configured
 from Mate2QA_site_config import (
     CONFIG as _SITE_CONFIG,
     STATE_FILE_DOMESTIC,
     print_site_url_banner,
+    refresh_config_from_env,
 )
 
 
@@ -23,9 +27,12 @@ from Mate2QA_site_config import (
 # =========================
 CONFIG = {
     **_SITE_CONFIG,
-    # 국내 수기 화면의 판매채널 option value (환경에 맞게 변경)
+    # 화주 (search_filter_domestic.json shipper_label 우선, 없으면 아래 값·사이트 기본)
+    "shipper_label": "",
+    # 국내 수기 화면의 판매채널 option value (없으면 목록 첫 번째)
     "sach_cd_value": "SACH0020",
-    "sample_product_cd": "P000000000005754",
+    # 상품코드 (비우면 Ably/기본 사이트별 기본값 사용)
+    "sample_product_cd": "",
     # 배송지 우편번호 팝업 검색어
     "address_search_keyword": "지플러스타워",
     "headless": False,
@@ -45,42 +52,63 @@ CONFIG = {
 STATE_FILE = STATE_FILE_DOMESTIC
 
 
-def select_company_value(page):
-    """pwn_header_change에서 화주사 선택합니다."""
+def resolve_shipper_label(config: Dict) -> str:
+    """화주 이름: search_filter_domestic.json → CONFIG → 사이트 기본 순."""
+    data = load_search_filter()
+    if data:
+        label = (data.get("shipper_label") or "").strip()
+        if label:
+            return label
+    configured = (config.get("shipper_label") or "").strip()
+    if configured:
+        return configured
+    login_url = (config.get("login_url") or "").strip()
+    if _is_ably_login_url(login_url):
+        return "아이니"
+    return "★샘플 화주사"
+
+
+def resolve_sample_product_cd(config: Dict) -> str:
+    """상품코드: CONFIG 지정값 → 사이트 기본 순."""
+    configured = (config.get("sample_product_cd") or "").strip()
+    if configured:
+        return configured
+    login_url = (config.get("login_url") or "").strip()
+    if _is_ably_login_url(login_url):
+        return "P000000000000055"
+    return "P000000000005754"
+
+
+def select_company_value(page, config: Dict):
+    """pwn_header_change에서 화주사를 선택합니다."""
+    target_label = resolve_shipper_label(config)
+    if not target_label:
+        return
+
     selector = 'select[name="pwn_header_change"]'
-    target_label = "★샘플 화주사"
+    try:
+        page.locator(selector).first.wait_for(state="visible", timeout=15_000)
+        page.wait_for_function(
+            """() => {
+                const el = document.querySelector('select[name="pwn_header_change"]');
+                return el && el.options && el.options.length > 1;
+            }""",
+            timeout=15_000,
+        )
+    except PlaywrightTimeoutError:
 
-    if page.locator(selector).count() > 0:
-        page.select_option(selector, label=target_label)
-        print(f"[안내] '{target_label}' 값을 선택했습니다.")
-        return
 
-    trigger_candidates = [
-        "#pwn_header_change",
-        '[name="pwn_header_change"]',
-        'button:has-text("선택하세요")',
-        'span:has-text("선택하세요")',
-    ]
-    trigger_loc, _ = first_visible_locator(page, trigger_candidates)
-    if trigger_loc:
-        trigger_loc.click()
-        page.locator(f'text="{target_label}"').first.click()
-        print(f"[안내] '{target_label}' 값을 선택했습니다.")
-        return
+        pass
 
-    print(
-        "[경고] pwn_header_change 요소를 찾지 못했습니다. "
-        "회사가 이미 선택된 환경으로 보고 회사 전환 단계를 건너뜁니다."
-    )
+    select_shipper_if_configured(page, target_label)
 
 
 def open_domestic_order_register_page(page, config: Dict):
     """국내 주문목록으로 이동한 뒤 주문서 추가 화면으로 진입합니다."""
     page.goto(config["order_list_url"], wait_until="domcontentloaded")
     page.wait_for_timeout(1000)
-    print(f"[안내] 국내 주문목록으로 이동했습니다. 현재 URL: {page.url}")
 
-    select_company_value(page)
+    select_company_value(page, config)
 
     add_btn_candidates = [
         'button:has-text("주문서추가")',
@@ -90,21 +118,14 @@ def open_domestic_order_register_page(page, config: Dict):
     ]
     add_btn, btn_sel = first_visible_locator(page, add_btn_candidates)
     if add_btn:
-        print(f"[디버그] 주문서추가 버튼 셀렉터: {btn_sel}")
         add_btn.click()
         page.wait_for_load_state("domcontentloaded")
         page.wait_for_timeout(1200)
-        print(f"[안내] 주문서추가 클릭 완료. 현재 URL: {page.url}")
         return
 
-    print(
-        "[안내] 주문서추가 버튼을 찾지 못해 수기등록 URL로 직접 이동합니다. "
-        f"(대상: {config['order_register_url']})"
-    )
     page.goto(config["order_register_url"], wait_until="domcontentloaded")
     page.wait_for_timeout(1200)
-    select_company_value(page)
-    print(f"[안내] 수기등록 페이지 로드 완료. 현재 URL: {page.url}")
+    select_company_value(page, config)
 
 
 def select_domestic_sach_cd(page, sach_cd_value: str):
@@ -134,11 +155,20 @@ def select_domestic_sach_cd(page, sach_cd_value: str):
     )
     if not picked:
         raise ValueError("sach_cd에서 선택 가능한 option value가 없습니다.")
-    print(f"[안내] sach_cd='{picked}' 선택 완료 (요청 value: {sach_cd_value})")
 
 
-def search_product_in_popup(page, product_code: str):
-    """상품 검색 팝업에서 상품코드로 조회를 실행합니다. (국내: searchProdBtn 우선)"""
+def _get_product_search_scope(page):
+    """상품 검색 팝업(모달) 범위를 반환합니다. 없으면 페이지 전체를 사용합니다."""
+    modal = page.locator(".modal.show").filter(
+        has=page.locator('input[name="searchTxt"], input#searchTxt')
+    ).first
+    if modal.count() > 0 and modal.is_visible():
+        return modal
+    return page.locator("body")
+
+
+def _open_product_search_popup(page) -> None:
+    """주문서 등록 화면에서 상품 검색 팝업을 엽니다."""
     search_btn_candidates = [
         "#searchProdBtn",
         '[id="searchProdBtn"]',
@@ -150,65 +180,115 @@ def search_product_in_popup(page, product_code: str):
     if not search_btn:
         raise ValueError("'상품 검색' 또는 searchProdBtn을 찾지 못했습니다. selector를 확인해 주세요.")
 
-    print(f"[디버그] 상품 검색 버튼 셀렉터: {btn_sel}")
     search_btn.click()
     page.wait_for_timeout(1200)
+    scope = _get_product_search_scope(page)
+    scope.locator('input[name="searchTxt"], input#searchTxt').first.wait_for(
+        state="visible", timeout=10_000
+    )
 
-    if page.locator('select[name="searchColumn"]').count() > 0:
-        page.select_option('select[name="searchColumn"]', value="prod_cd")
+
+def _run_product_search_in_popup(page, product_code: str) -> None:
+    """상품 검색 팝업에서 검색조건·검색어를 넣고 조회합니다."""
+    scope = _get_product_search_scope(page)
+
+    col_loc = scope.locator('select[name="searchColumn"], select#searchColumn').first
+    if col_loc.count() > 0 and col_loc.is_visible():
+        try:
+            col_loc.select_option(value="prod_cd")
+        except Exception:
+            col_loc.select_option(label="prod_cd")
     else:
-        dropdown_candidates = [
-            "#searchColumn",
-            '[name="searchColumn"]',
-        ]
-        dropdown, _ = first_visible_locator(page, dropdown_candidates)
+        dropdown, _ = first_visible_locator(
+            page,
+            ["#searchColumn", '[name="searchColumn"]'],
+        )
         if not dropdown:
             raise ValueError("searchColumn 요소를 찾지 못했습니다.")
         dropdown.click()
         page.locator('text="prod_cd"').first.click()
 
-    txt_candidates = [
-        'input[name="searchTxt"]',
-        "#searchTxt",
-    ]
-    txt_input, txt_sel = first_visible_locator(page, txt_candidates)
+    txt_input, txt_sel = first_visible_locator(
+        page,
+        ['input[name="searchTxt"]', "#searchTxt"],
+    )
     if not txt_input:
         raise ValueError("searchTxt 입력 요소를 찾지 못했습니다.")
-    txt_input.fill(product_code)
-    print(f"[디버그] searchTxt 셀렉터: {txt_sel}")
+    txt_input.fill(product_code or "")
 
-    search_candidates = [
-        "#prodSearchBtn",
-        '[name="prodSearchBtn"]',
-        'button:has-text("검색")',
-    ]
-    prod_search_btn, prod_btn_sel = first_visible_locator(page, search_candidates)
+    prod_search_btn, prod_btn_sel = first_visible_locator(
+        page,
+        ["#prodSearchBtn", '[name="prodSearchBtn"]', 'button:has-text("검색")'],
+    )
     if not prod_search_btn:
         raise ValueError("prodSearchBtn 버튼을 찾지 못했습니다.")
-    print(f"[디버그] prodSearchBtn 셀렉터: {prod_btn_sel}")
     prod_search_btn.click()
     page.wait_for_load_state("domcontentloaded")
     page.wait_for_timeout(1000)
-    print(f"[안내] 상품 검색 실행 완료. 검색코드: {product_code}")
 
 
-def click_select_button(page):
-    """검색 결과의 '선택' 버튼을 클릭합니다."""
+def _grid_contains_product_code(scope, product_code: str) -> bool:
+    """검색 그리드에 지정 상품코드가 있는지 확인합니다."""
+    code = (product_code or "").strip()
+    if not code:
+        return False
+    try:
+        return bool(
+            scope.evaluate(
+                """(root, target) => {
+                    const rows = root.querySelectorAll('.tabulator-row');
+                    for (const row of rows) {
+                        const cell = row.querySelector('[tabulator-field="prod_cd"]');
+                        const text = ((cell && cell.innerText) || '').trim();
+                        if (text === target) return true;
+                    }
+                    return false;
+                }""",
+                code,
+            )
+        )
+    except Exception:
+        return False
+
+
+def _click_first_product_select_button(scope) -> None:
+    """검색 결과 그리드 첫 번째 행의 '선택' 버튼을 클릭합니다."""
+    row = scope.locator(".tabulator-row").first
+    row.wait_for(state="visible", timeout=10_000)
+
     select_btn_candidates = [
-        ".tabulator-row .btn-info",
-        "button.btn.btn-xs.btn-info.waves-effect.waves-themed.mt-1",
-        "a.btn.btn-xs.btn-info.waves-effect.waves-themed.mt-1",
-        'button:has-text("선택")',
-        'a:has-text("선택")',
+        row.locator("button.btn-info").first,
+        row.locator('button:has-text("선택")').first,
+        row.locator('a:has-text("선택")').first,
+        scope.locator(".tabulator-row .btn-info").first,
+        scope.locator('button:has-text("선택")').first,
     ]
-    select_btn, btn_sel = first_visible_locator(page, select_btn_candidates)
-    if not select_btn:
-        raise ValueError("'선택' 버튼을 찾지 못했습니다. selector를 확인해 주세요.")
+    for btn in select_btn_candidates:
+        if btn.count() > 0 and btn.is_visible():
+            btn.click()
+            page_wait = scope.page
+            page_wait.wait_for_timeout(1000)
+            return
 
-    print(f"[디버그] 선택 버튼 셀렉터: {btn_sel}")
-    select_btn.click()
-    page.wait_for_timeout(1000)
-    print("[안내] '선택' 버튼 클릭을 완료했습니다.")
+    raise ValueError("상품 검색 결과에서 '선택' 버튼을 찾지 못했습니다.")
+
+
+def search_and_select_product_in_popup(page, product_code: str) -> None:
+    """
+    상품 검색 팝업에서 상품코드로 조회 후 선택합니다.
+    해당 코드가 없으면 전체 조회로 바꿔 첫 번째 상품을 선택합니다.
+    """
+    _open_product_search_popup(page)
+    _run_product_search_in_popup(page, product_code)
+
+    scope = _get_product_search_scope(page)
+    if _grid_contains_product_code(scope, product_code):
+        _click_first_product_select_button(scope)
+        return
+
+    _run_product_search_in_popup(page, "")
+    scope = _get_product_search_scope(page)
+    _click_first_product_select_button(scope)
 
 
 def fill_field(
@@ -233,7 +313,6 @@ def fill_field(
     if not field:
         if required:
             raise ValueError(f"{field_name} 입력 요소를 찾지 못했습니다.")
-        print(f"[경고] {field_name} 입력 요소를 찾지 못해 건너뜁니다.")
         return
     try:
         blocked = field.evaluate("(el) => !!(el.readOnly || el.disabled)")
@@ -242,7 +321,6 @@ def fill_field(
     if blocked:
         if required:
             raise ValueError(f"{field_name} 입력 요소가 읽기 전용·비활성입니다.")
-        print(f"[경고] {field_name}이(가) 읽기 전용·비활성이라 건너뜁니다.")
         return
     field.fill(value)
     if trigger_derived_calc:
@@ -256,7 +334,6 @@ def fill_field(
         )
         page.wait_for_timeout(150)
     safe_value = value.encode("cp949", errors="replace").decode("cp949")
-    print(f"[안내] {field_name}='{safe_value}' 입력 완료 (selector: {sel})")
 
 
 def wait_until_derived_field_nonempty(page, field_name: str, timeout_ms: int = 10000):
@@ -292,12 +369,10 @@ def wait_until_derived_field_nonempty(page, field_name: str, timeout_ms: int = 1
         page.wait_for_function(js_has_content, arg=field_name, timeout=timeout_ms)
         display_val = page.evaluate(js_read_display, field_name)
         safe = display_val.encode("cp949", errors="replace").decode("cp949")
-        print(f"[안내] {field_name}(자동계산 표시) 반영 확인: '{safe}'")
     except PlaywrightTimeoutError:
-        print(
-            f"[경고] {field_name} 표시가 {timeout_ms}ms 내 채워지지 않았습니다. "
-            "화면에서 수동으로 확인해 주세요."
-        )
+
+
+        pass
 
 
 def fill_field_by_candidates(page, field_names, value: str, required: bool = True):
@@ -318,20 +393,14 @@ def fill_field_by_candidates(page, field_names, value: str, required: bool = Tru
             except Exception:
                 blocked = False
             if blocked:
-                print(
-                    f"[안내] {name}은(는) 읽기 전용·비활성입니다. "
-                    "우편번호 검색으로만 채워지는 필드일 수 있어 다음 후보로 넘어갑니다."
-                )
                 continue
             field.fill(value)
             safe_value = value.encode("cp949", errors="replace").decode("cp949")
-            print(f"[안내] {name}='{safe_value}' 입력 완료 (selector: {sel})")
             return
 
     if required:
         joined = ", ".join(field_names)
         raise ValueError(f"입력 요소를 찾지 못했습니다. 후보: {joined}")
-    print(f"[경고] 입력 요소를 찾지 못해 건너뜁니다. 후보: {', '.join(field_names)}")
 
 
 def click_orderer_info_title(page):
@@ -346,7 +415,6 @@ def click_orderer_info_title(page):
         raise ValueError("주문자 정보 제목(collapseThree) 요소를 찾지 못했습니다.")
     title_loc.click()
     page.wait_for_timeout(300)
-    print(f"[안내] 주문자 정보 제목 클릭 완료 (selector: {title_sel})")
 
 
 def click_section_title(page, section_text: str):
@@ -361,7 +429,6 @@ def click_section_title(page, section_text: str):
         raise ValueError(f"'{section_text}' 섹션 제목을 찾지 못했습니다.")
     title_loc.click()
     page.wait_for_timeout(300)
-    print(f"[안내] '{section_text}' 섹션 클릭 완료 (selector: {title_sel})")
 
 
 def _root_wait_ms(root: Union[Page, Frame], ms: int) -> None:
@@ -386,7 +453,6 @@ def _click_domestic_address_search_trigger(page: Page) -> bool:
     if not loc:
         return False
     loc.click()
-    print(f"[안내] 배송지 주소 검색 트리거 클릭 (selector: {sel})")
     return True
 
 
@@ -416,7 +482,6 @@ def _submit_address_keyword(root: Union[Page, Frame], keyword: str) -> None:
         raise ValueError("팝업에서 region_name(주소 검색) 입력칸을 찾지 못했습니다.")
     # placeholder span이 포인터 이벤트를 가로채는 UI → 강제 입력
     region.fill(keyword, force=True)
-    print(f"[안내] 주소 검색어 입력: {keyword}")
 
     search_btn = root.locator(".btn_search").first
     if search_btn.count() == 0:
@@ -424,7 +489,6 @@ def _submit_address_keyword(root: Union[Page, Frame], keyword: str) -> None:
     if search_btn.count() == 0:
         raise ValueError("팝업에서 btn_search 버튼을 찾지 못했습니다.")
     search_btn.click()
-    print("[안내] 주소 검색(btn_search) 클릭 완료")
 
 
 def _wait_domestic_base_address_filled(page: Page, timeout_ms: int = 8000) -> None:
@@ -478,7 +542,6 @@ def _wait_domestic_base_address_filled(page: Page, timeout_ms: int = 8000) -> No
                 .filter((item) => item.key && /(addr|zip|post)/i.test(item.key))
                 .slice(0, 20)"""
         )
-        print(f"[디버그] 주소 관련 필드 후보: {debug_values}")
         raise ValueError(
             "주소 검색 결과를 클릭했지만 우편번호·기본주소 반영을 확인하지 못했습니다. "
             "화면의 배송지 우편번호·기본주소 필드 name/id를 확인해 주세요."
@@ -487,7 +550,6 @@ def _wait_domestic_base_address_filled(page: Page, timeout_ms: int = 8000) -> No
     first = values[0]
     safe_key = str(first.get("key", "")).encode("cp949", errors="replace").decode("cp949")
     safe_value = str(first.get("value", "")).encode("cp949", errors="replace").decode("cp949")
-    print(f"[안내] 주소 선택 반영 확인: {safe_key}='{safe_value[:60]}'")
 
 
 def _click_first_address_search_result(root: Union[Page, Frame]) -> None:
@@ -533,9 +595,6 @@ def _click_first_address_search_result(root: Union[Page, Frame]) -> None:
                 text = (addr_span.inner_text(timeout=2000) or "").strip()[:80]
             else:
                 text = (loc.inner_text(timeout=2000) or "").strip()[:80]
-            print(
-                f"[안내] 주소 검색 첫 번째 결과 클릭 (selector: {sel}, text: {text!r})"
-            )
             return
         except PlaywrightTimeoutError:
             continue
@@ -553,30 +612,31 @@ def fill_domestic_delivery_address_via_popup(
     """
     keyword = config.get("address_search_keyword", "지플러스타워")
 
-    if not _click_domestic_address_search_trigger(page):
-        raise ValueError(
-            "배송지 주소 검색 버튼(i.fal.fa-search-location 등)을 찾지 못했습니다."
-        )
+    with popup_page_zoom(page, config):
+        if not _click_domestic_address_search_trigger(page):
+            raise ValueError(
+                "배송지 주소 검색 버튼(i.fal.fa-search-location 등)을 찾지 못했습니다."
+            )
 
-    # 새 창은 열리지 않음 — 현재 페이지의 iframe 안에서만 주소 UI를 찾습니다.
-    page.wait_for_timeout(800)
-    try:
-        page.wait_for_load_state("domcontentloaded", timeout=15000)
-    except PlaywrightTimeoutError:
-        pass
+        # 새 창은 열리지 않음 — 현재 페이지의 iframe 안에서만 주소 UI를 찾습니다.
+        page.wait_for_timeout(800)
+        try:
+            page.wait_for_load_state("domcontentloaded", timeout=15000)
+        except PlaywrightTimeoutError:
+            pass
 
-    root = _find_frame_with_region_input(page)
-    if root is None:
-        raise ValueError(
-            "주소 검색 iframe에서 region_name 입력칸을 찾지 못했습니다. "
-            "iframe 구조를 확인해 주세요."
-        )
+        root = _find_frame_with_region_input(page)
+        if root is None:
+            raise ValueError(
+                "주소 검색 iframe에서 region_name 입력칸을 찾지 못했습니다. "
+                "iframe 구조를 확인해 주세요."
+            )
 
-    _submit_address_keyword(root, keyword)
-    _click_first_address_search_result(root)
-    _wait_domestic_base_address_filled(page)
+        _submit_address_keyword(root, keyword)
+        _click_first_address_search_result(root)
+        _wait_domestic_base_address_filled(page)
 
-    page.wait_for_timeout(300)
+        page.wait_for_timeout(300)
 
     detail = f"주소{stamp_yymmddhhmm}"
     fill_field(page, "dlvr_detail_addr", detail, required=False)
@@ -586,7 +646,6 @@ def try_select_domestic_dlvr_company(page):
     """국내 택배사 셀렉트가 있으면 첫 유효 option을 고릅니다. 없으면 무시합니다."""
     select_loc = page.locator('select[name="dlvr_base_cd"]').first
     if select_loc.count() == 0:
-        print("[안내] dlvr_base_cd 가 없어 택배사 자동 선택을 건너뜁니다.")
         return
     picked = select_loc.evaluate(
         """(el) => {
@@ -599,7 +658,9 @@ def try_select_domestic_dlvr_company(page):
         }"""
     )
     if picked:
-        print(f"[안내] dlvr_base_cd='{picked}' 자동 선택")
+
+
+        pass
 
 
 def click_save_button(page, *, confirm_swal: bool = True):
@@ -615,7 +676,6 @@ def click_save_button(page, *, confirm_swal: bool = True):
     if not save_btn:
         raise ValueError("'저장' 버튼을 찾지 못했습니다.")
 
-    print(f"[디버그] 저장 버튼 셀렉터: {save_sel}")
     save_btn.click()
     page.wait_for_timeout(800)
 
@@ -632,10 +692,9 @@ def click_save_button(page, *, confirm_swal: bool = True):
 
     if confirm_swal:
         if click_swal_confirm_if_visible(5000):
-            print("[안내] 저장 확인창에서 '확인'을 클릭했습니다.")
             page.wait_for_timeout(400)
             if click_swal_confirm_if_visible(3000):
-                print("[안내] 후속 알림 창에서 '확인'을 클릭했습니다.")
+                pass
         else:
             print(
                 "[경고] 저장 확인창을 찾지 못했습니다. "
@@ -711,44 +770,38 @@ def fill_domestic_order_detail_fields(
 def run():
     """로그인 후 국내 수기 주문 등록 자동화를 수행합니다."""
     print_site_url_banner()
-    creds = load_env_credentials()
+    config = refresh_config_from_env(CONFIG)
+    creds = load_env_credentials(config["login_url"])
+    product_cd = resolve_sample_product_cd(config)
+    shipper = resolve_shipper_label(config)
     now = datetime.now()
     stamp_yymmddhhmm = now.strftime("%y%m%d%H%M")
     stamp_yymmddhh = now.strftime("%y%m%d%H")
     stamp_mmddhhmm = now.strftime("%m%d%H%M")
-    print(f"[안내] 시간값 YYMMDDHHMM: {stamp_yymmddhhmm}")
-    print(f"[안내] 시간값 YYMMDDHH: {stamp_yymmddhh}")
-    print(f"[안내] 시간값 MMDDHHMM: {stamp_mmddhhmm}")
 
     with sync_playwright() as p:
-        browser, context = create_context(p, CONFIG, state_file=STATE_FILE)
+        browser, context = create_context(p, config, state_file=STATE_FILE)
         page = context.new_page()
 
         try:
-            ensure_login_only(page, context, CONFIG, creds, state_file=STATE_FILE)
-            open_domestic_order_register_page(page, CONFIG)
-            select_domestic_sach_cd(page, CONFIG["sach_cd_value"])
-            search_product_in_popup(page, CONFIG["sample_product_cd"])
-            click_select_button(page)
+            config = ensure_login_only(page, context, config, creds, state_file=STATE_FILE)
+            open_domestic_order_register_page(page, config)
+            select_domestic_sach_cd(page, config["sach_cd_value"])
+            search_and_select_product_in_popup(page, product_cd)
             fill_domestic_order_detail_fields(
                 page,
-                CONFIG,
+                config,
                 stamp_mmddhhmm,
                 stamp_yymmddhhmm,
                 stamp_yymmddhh,
             )
             # 저장 후 SweetAlert/알림은 자동으로 누르지 않음 (수동 확인)
             click_save_button(page, confirm_swal=False)
-            print("[안내] 국내 수기등록 자동화 및 저장(확인창 포함)까지 완료했습니다.")
             try:
                 input("확인창에서 직접 처리하신 뒤, 종료하려면 Enter를 누르세요...")
             except EOFError:
-                print(
-                    "[안내] 표준 입력이 없거나 닫혀 있어 Enter 대기를 건너뜁니다. "
-                    "브라우저·확인창을 확인해 주세요."
-                )
+                pass
         except PlaywrightTimeoutError:
-            print("[오류] 페이지 로딩이 지연되었습니다. URL/네트워크/selector를 확인해 주세요.")
             raise
         finally:
             context.storage_state(path=str(STATE_FILE))

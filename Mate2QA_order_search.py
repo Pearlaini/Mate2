@@ -8,7 +8,9 @@ from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from Mate2QA_login import first_visible_locator
 
-SEARCH_FILTER_FILE = Path(__file__).resolve().parent / "search_filter_domestic.json"
+from Mate2QA_site_config import SEARCH_FILTER_DOMESTIC_FILE
+
+SEARCH_FILTER_FILE = SEARCH_FILTER_DOMESTIC_FILE
 
 SEARCH_FIELD_KEYS = (
     "search_dtm",
@@ -41,7 +43,6 @@ def save_search_filter(data: Dict[str, Any]) -> None:
     """검색·화주 설정을 동일 경로에 덮어씁니다."""
     with SEARCH_FILTER_FILE.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    print(f"[안내] 검색 조건을 {SEARCH_FILTER_FILE}에 저장했습니다.")
 
 
 def get_default_criteria() -> Dict[str, str]:
@@ -154,7 +155,6 @@ def wait_order_search_form(page: Page, timeout_ms: int = 15_000) -> None:
             "검색 버튼(button#searchBtn)을 찾지 못했습니다. 검색 영역 로딩을 확인해 주세요."
         )
     btn.wait_for(state="visible", timeout=timeout_ms)
-    print(f"[디버그] 검색 영역 대기 완료 (버튼: {sel})")
     txt_candidates = ['input[name="searchTxt"]', "#searchTxt"]
     txt_loc, _ = first_visible_locator(page, txt_candidates)
     if not txt_loc:
@@ -187,10 +187,11 @@ def fill_search_filter(
     if tell_manual_search:
         print("[안내] 검색 조건을 입력했습니다. 「검색」 버튼은 직접 눌러 주세요.")
     else:
-        print(
-            "[안내] 저장된 검색 조건을 입력란에 반영했습니다. "
-            f"(searchTxt 셀렉터: {txt_sel})"
-        )
+
+
+
+
+        pass
 
 
 def click_search_button(page: Page) -> None:
@@ -200,12 +201,10 @@ def click_search_button(page: Page) -> None:
         raise ValueError(
             "「검색」 버튼(button#searchBtn.btn-info)을 찾지 못했습니다."
         )
-    print(f"[디버그] 검색 버튼 셀렉터: {sel}")
     btn.click()
     page.wait_for_load_state("domcontentloaded")
     page.wait_for_timeout(800)
     _close_datepicker_if_open(page)
-    print("[안내] 「검색」 버튼을 클릭했습니다.")
 
 
 HEADER_SELECT_ALL = (
@@ -256,14 +255,12 @@ def click_select_all_orders(page: Page) -> None:
     total = rows.count()
     checked = sum(1 for i in range(total) if rows.nth(i).is_checked())
     if checked == 0 and total > 0:
-        print("[경고] 헤더 전체 선택이 반영되지 않아 행 체크박스를 직접 선택합니다.")
         for i in range(total):
             cb = rows.nth(i)
             if not cb.is_checked():
                 cb.click(force=True)
         page.wait_for_timeout(300)
         checked = sum(1 for i in range(total) if rows.nth(i).is_checked())
-    print(f"[안내] 검색 후 전체 선택 완료 ({checked}/{total}건).")
 
 
 def apply_criteria_and_search(
@@ -284,10 +281,6 @@ def apply_criteria_and_search(
                 last_error = exc
                 if attempt == 3:
                     break
-                print(
-                    "[경고] 검색 결과 전체 선택을 아직 못했습니다. "
-                    f"{attempt}/3 재검색 후 다시 시도합니다."
-                )
                 page.wait_for_timeout(1500 * attempt)
                 click_search_button(page)
                 wait_search_grid(page, timeout_ms=45_000)
@@ -298,11 +291,6 @@ def apply_criteria_and_search(
 def _print_criteria_summary(criteria: Dict[str, str], *, prefix: str = "") -> None:
     """검색 6개 요약을 터미널에 출력합니다."""
     head = f"{prefix} " if prefix else ""
-    print(f"{head}[검색 조건] 일자={criteria.get('search_dtm')} "
-          f"{criteria.get('search_start_dtm')}~{criteria.get('search_end_dtm')} "
-          f"채널={criteria.get('search_sach_cd') or '(전체)'} "
-          f"컬럼={criteria.get('search_column')} "
-          f"검색어={criteria.get('search_txt') or '(없음)'}")
 
 
 def run_saved_search_on_page(
@@ -328,20 +316,11 @@ def run_saved_search_on_page(
     saved_txt = ((data.get("default") or {}).get("search_txt") or "").strip()
     snos = data.get("selected_od_snos") or []
     if saved_txt:
-        print(
-            "[안내] 주문서처리 목록: 저장한 검색 조건을 입력한 뒤 "
-            "「검색」 버튼을 눌러 목록을 조회합니다."
-        )
+        pass
     elif snos:
-        print(
-            "[안내] 주문서처리 목록: 검색어가 비어 있어 선택한 "
-            "주문일련번호로 「검색」까지 실행합니다."
-        )
-        print(f"[안내] 선택한 주문일련번호 {len(snos)}건: {';'.join(snos)}")
+        pass
     else:
-        print(
-            "[안내] 주문서처리 목록: 저장된 조건으로 「검색」까지 실행합니다."
-        )
+        pass
     _print_criteria_summary(criteria)
 
     wait_order_search_form(page)
@@ -351,13 +330,16 @@ def run_saved_search_on_page(
         if shipper_label:
             page.wait_for_timeout(600)
     else:
-        print("[안내] 화주 재선택 없이 검색 조건만 적용합니다.")
+
+        pass
 
     apply_criteria_and_search(page, criteria, select_all_after=select_all_after)
     if select_all_after:
-        print("[안내] 검색·전체 선택까지 완료했습니다.")
+        pass
     else:
-        print("[안내] 같은 조건으로 조회했습니다. 이동한 주문이 목록에 보이는지 확인해 주세요.")
+
+
+        pass
 
 
 # 하위 호환 alias
@@ -370,42 +352,15 @@ def wait_search_grid(page: Page, timeout_ms: int = 30_000) -> None:
     try:
         row_cb.wait_for(state="visible", timeout=timeout_ms)
     except PlaywrightTimeoutError:
-        print(
-            "[경고] Select Row 체크박스가 보이지 않습니다. "
-            "검색 결과 0건이거나 그리드 로딩이 지연되었을 수 있습니다."
-        )
+        pass
     page.wait_for_timeout(500)
 
 
 def select_shipper_if_configured(page: Page, shipper_label: str) -> None:
-    """shipper_label이 있을 때만 pwn_header_change에서 화주를 선택합니다."""
-    label = (shipper_label or "").strip()
-    if not label:
-        return
+    """pwn_header_change에서 화주를 선택합니다 (터미널·브라우저 직접 선택 지원)."""
+    from Mate2QA_shipper_select import select_shipper_on_page
 
-    selector = 'select[name="pwn_header_change"]'
-    if page.locator(selector).count() > 0:
-        page.select_option(selector, label=label)
-        print(f"[안내] 화주 '{label}'을(를) 선택했습니다.")
-        return
-
-    trigger_candidates = [
-        "#pwn_header_change",
-        '[name="pwn_header_change"]',
-        'button:has-text("선택하세요")',
-        'span:has-text("선택하세요")',
-    ]
-    trigger_loc, _ = first_visible_locator(page, trigger_candidates)
-    if trigger_loc:
-        trigger_loc.click()
-        page.locator(f'text="{label}"').first.click()
-        print(f"[안내] 화주 '{label}'을(를) 선택했습니다.")
-        return
-
-    print(
-        "[경고] pwn_header_change 요소를 찾지 못했습니다. "
-        "화주 선택 단계를 건너뜁니다."
-    )
+    select_shipper_on_page(page, {"shipper_label": shipper_label})
 
 
 def save_search_criteria_from_page(page: Page) -> Dict[str, Any]:
@@ -431,26 +386,15 @@ def save_search_criteria_from_page(page: Page) -> Dict[str, Any]:
         "selected_od_snos": selected_snos,
     }
     save_search_filter(data)
-    print("[안내] 화면의 검색 조건을 저장했습니다.")
     _print_criteria_summary(criteria, prefix="→")
     if selected_snos:
         saved_txt = (criteria.get("search_txt") or "").strip()
         if saved_txt:
-            print(
-                f"[안내] 선택한 주문일련번호 {len(selected_snos)}건을 저장했습니다. "
-                f"검색어(#searchTxt)가 있어 다음 화면에서는 저장된 검색 조건을 "
-                f"그대로 사용합니다."
-            )
+            pass
         else:
-            print(
-                f"[안내] 선택한 주문일련번호 {len(selected_snos)}건을 저장했습니다. "
-                f"다음 화면 검색에 사용합니다: {';'.join(selected_snos)}"
-            )
+            pass
     else:
-        print(
-            "[경고] 체크된 행에서 주문일련번호를 읽지 못했습니다. "
-            "다음 화면에서는 기존 검색 조건만 사용합니다."
-        )
+        pass
     return data
 
 

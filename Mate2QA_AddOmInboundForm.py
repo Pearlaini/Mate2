@@ -1,35 +1,45 @@
-# QA WMS 입고요청 목록 — 로그인·화주 선택·입고요청 목록 이동
+# QA OMS 입고예정 목록 — 로그인·화주 선택·입고예정 목록 이동
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, sync_playwright
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 from Mate2QA_login import (
     create_context,
     ensure_login_only,
     first_visible_locator,
     load_env_credentials,
+    popup_page_zoom,
 )
 from Mate2QA_site_config import (
     CONFIG as _SITE_CONFIG,
     PROJECT_DIR,
     STATE_FILE_DOMESTIC,
+    join_origin_path,
     print_site_url_banner,
 )
+
+# 로그인 후 이동 — OMS 입고예정 목록
+OM_PUT_EXPECT_LIST_PATH = "/om/put/expect/expectList.do"
+from Mate2QA_order_search import load_search_filter, select_shipper_if_configured
 from Mate2QA_order_step import click_popup_ok_if_visible
-from Mate2QA_shipper_select import select_shipper_on_page
 
 # =========================
 # 사용자 설정 영역
 # =========================
 CONFIG = {
     **_SITE_CONFIG,
+    # 로그인 후 이동 URL (LOGIN_URL 호스트 + 입고예정 목록 경로)
+    "om_put_expect_list_url": join_origin_path(
+        _SITE_CONFIG["login_url"], OM_PUT_EXPECT_LIST_PATH
+    ),
     # 화주 선택 이름 (search_filter_domestic.json shipper_label이 있으면 그 값 우선)
     "shipper_label": "아이니",
-    # 물류센터 없으면 목록 첫 번째 선택
+    # 입고등록 화면 물류센터 이름 (없으면 목록 첫 번째 선택)
     "depot_label": "구로센터",
-    # 상품 없으면 목록 첫 번째 항목 자동 선택
+    # 입고등록 화면 공급사 — Ably는 목록 첫 번째 항목 자동 선택
+    # 입고상품추가 팝업 — 검색조건·검색어·입고수량
     "item_search_column": "prod_cd",
     "item_search_keyword": "P000000000000055",
     "item_put_plan_qty": "10",
@@ -39,20 +49,47 @@ CONFIG = {
 
 STATE_FILE = STATE_FILE_DOMESTIC
 
-_WM_INBOUND_PAGE_READY = ["#btnReqRgst", 'button:has-text("입고등록")']
+
+def resolve_shipper_label(config: Dict) -> str:
+    """화주 이름: search_filter_domestic.json → CONFIG 순으로 읽습니다."""
+    data = load_search_filter()
+    if data:
+        label = (data.get("shipper_label") or "").strip()
+        if label:
+            return label
+    return (config.get("shipper_label") or "").strip()
 
 
 def select_company_value(page, config: Dict) -> None:
-    """WMS 입고요청 목록 화면에서 화주를 선택합니다."""
-    select_shipper_on_page(
-        page, config, page_ready_selectors=_WM_INBOUND_PAGE_READY
-    )
+    """pwn_header_change에서 화주사를 선택합니다."""
+    target_label = resolve_shipper_label(config)
+    if not target_label:
+        return
+
+    selector = 'select[name="pwn_header_change"]'
+    try:
+        page.locator(selector).first.wait_for(state="visible", timeout=15_000)
+        page.wait_for_function(
+            """() => {
+                const el = document.querySelector('select[name="pwn_header_change"]');
+                return el && el.options && el.options.length > 1;
+            }""",
+            timeout=15_000,
+        )
+    except PlaywrightTimeoutError:
 
 
-def goto_wm_put_req_list(page, config: Dict):
-    """WMS 입고요청 목록 화면으로 이동한 뒤 화주를 선택합니다."""
-    page.goto(config["wm_put_req_list_url"], wait_until="domcontentloaded")
+        pass
+
+    select_shipper_if_configured(page, target_label)
+
+
+def goto_om_put_expect_list(page, config: Dict):
+    """OMS 입고예정 목록 화면으로 이동한 뒤 화주를 선택합니다."""
+    target_url = config["om_put_expect_list_url"]
+    page.goto(target_url, wait_until="domcontentloaded")
     page.wait_for_timeout(1000)
+
     select_company_value(page, config)
 
 
@@ -62,23 +99,12 @@ def click_inbound_register_button(page):
         "#btnReqRgst",
         'button:has-text("입고등록")',
     ]
-    btn, _ = first_visible_locator(page, btn_candidates)
+    btn, btn_sel = first_visible_locator(page, btn_candidates)
     if not btn:
         raise ValueError("'입고등록' 버튼(btnReqRgst)을 찾지 못했습니다.")
 
-    btn.scroll_into_view_if_needed()
-    page.wait_for_timeout(300)
-    if not btn.is_enabled():
-        raise ValueError(
-            "'입고등록' 버튼이 비활성입니다. 화주를 먼저 선택했는지 확인해 주세요."
-        )
-
-    try:
-        with page.expect_navigation(timeout=20_000, wait_until="domcontentloaded"):
-            btn.click(timeout=15_000)
-    except PlaywrightTimeoutError:
-        btn.click(timeout=15_000)
-        page.wait_for_load_state("domcontentloaded")
+    btn.click()
+    page.wait_for_load_state("domcontentloaded")
     page.wait_for_timeout(1200)
 
 
@@ -118,6 +144,11 @@ def _is_depot_selectable(page) -> bool:
 def select_depot_cd(page, depot_label: str = "구로센터") -> None:
     """입고등록 화면에서 물류센터(depot_cd)를 선택합니다. 선택 불가면 건너뜁니다."""
     if not _is_depot_selectable(page):
+        fixed_nm, fixed_cd = _read_fixed_depot_info(page)
+        if fixed_nm or fixed_cd:
+            pass
+        else:
+            pass
         return
 
     selector = 'select[name="depot_cd"]'
@@ -143,6 +174,13 @@ def select_depot_cd(page, depot_label: str = "구로센터") -> None:
     )
     if not picked.get("value"):
         raise ValueError("depot_cd에서 선택 가능한 option이 없습니다.")
+
+    if picked.get("matched"):
+        pass
+    else:
+
+
+        pass
 
 
 def select_vendor_cd(page) -> None:
@@ -180,12 +218,13 @@ def fill_field(page, field_name: str, value: str, *, required: bool = True):
         f'textarea[name="{field_name}"]',
         f"#{field_name}",
     ]
-    field, _ = first_visible_locator(page, candidates)
+    field, sel = first_visible_locator(page, candidates)
     if not field:
         if required:
             raise ValueError(f"{field_name} 입력 요소를 찾지 못했습니다.")
         return
     field.fill(value)
+    safe_value = value.encode("cp949", errors="replace").decode("cp949")
 
 
 def fill_put_request_info_fields(page):
@@ -202,6 +241,7 @@ def fill_put_request_info_fields(page):
     sub_shipg_no = f"A{yymmddhhmm}"
     remark = "J"
 
+
     fill_field(page, "put_car_no", put_car_no)
     fill_field(page, "car_drv_nm", car_drv_nm)
     fill_field(page, "car_drv_tel_no", car_drv_tel_no)
@@ -214,7 +254,7 @@ def ask_inbound_item_method() -> str:
     print(
         "\n입고상품 등록 방식을 선택해 주세요.\n"
         "  1  입고상품추가\n"
-        "  2  엑셀 업로드"
+        "  2  엑셀 업로드\n"
     )
     try:
         choice = input("번호 입력 (1 또는 2, Enter=1): ").strip()
@@ -233,7 +273,7 @@ def click_item_register_button(page) -> None:
         "#itemRgstBtn",
         'button:has-text("입고상품추가")',
     ]
-    btn, _ = first_visible_locator(page, btn_candidates)
+    btn, btn_sel = first_visible_locator(page, btn_candidates)
     if not btn:
         raise ValueError("'입고상품추가' 버튼(itemRgstBtn)을 찾지 못했습니다.")
 
@@ -267,41 +307,27 @@ def _select_item_search_column(modal, column_value: str) -> None:
     # value 매칭 실패 시 라벨(prod_cd 텍스트)로 재시도
     try:
         col_loc.select_option(label=value)
-    except Exception:
+    except Exception as exc:
+
+
+
+
         pass
 
 
-def _wait_item_search_results(modal, *, timeout_ms: int = 2_000) -> int:
-    """팝업 그리드에 검색 결과 행이 나타날 때까지 대기합니다. 없으면 빠르게 0을 반환합니다."""
+def _wait_item_search_results(modal, *, timeout_ms: int = 12_000) -> int:
+    """팝업 그리드에 검색 결과 행이 나타날 때까지 대기합니다."""
     rows = modal.locator("#grid-table .tabulator-row, .tabulator-row")
-    page = modal.page
-    elapsed = 0
-    poll_ms = 200
-    empty_streak = 0
-
-    while elapsed < timeout_ms:
-        count = rows.count()
-        if count > 0:
-            try:
-                if rows.first.is_visible():
-                    return count
-            except PlaywrightTimeoutError:
-                pass
-            empty_streak = 0
-        else:
-            empty_streak += 1
-            # 행이 없는 상태가 잠시 유지되면 검색 결과 없음으로 판단
-            if empty_streak >= 3 and elapsed >= 500:
-                return 0
-
-        page.wait_for_timeout(poll_ms)
-        elapsed += poll_ms
-
-    return 0
+    try:
+        rows.first.wait_for(state="visible", timeout=timeout_ms)
+    except PlaywrightTimeoutError:
+        return 0
+    count = rows.count()
+    return count
 
 
-def search_item_in_add_popup(page, config: Dict) -> int:
-    """입고상품추가 팝업(모달) 안에서만 검색어 입력 후 검색합니다. 검색 결과 건수를 반환합니다."""
+def search_item_in_add_popup(page, config: Dict) -> None:
+    """입고상품추가 팝업(모달) 안에서만 검색어 입력 후 검색합니다."""
     search_keyword = (config.get("item_search_keyword") or "").strip()
     if not search_keyword:
         raise ValueError("입고상품 검색어(item_search_keyword)가 비어 있습니다.")
@@ -317,129 +343,68 @@ def search_item_in_add_popup(page, config: Dict) -> int:
     txt_input.fill("")
     txt_input.fill(search_keyword)
     page.wait_for_timeout(300)
+    filled = (txt_input.input_value() or "").strip()
 
     search_btn = modal.locator("#searchBtn, button#searchBtn").first
     if search_btn.count() == 0 or not search_btn.is_visible():
         raise ValueError("입고상품추가 팝업의 검색 버튼(searchBtn)을 찾지 못했습니다.")
     search_btn.click()
-    page.wait_for_timeout(400)
-
-    row_count = _wait_item_search_results(modal, timeout_ms=1_500)
-    return row_count
-
-
-def _first_visible_in_modal(modal, candidates: List[str]):
-    """모달 범위에서 보이는 첫 요소를 찾습니다."""
-    for sel in candidates:
-        loc = modal.locator(sel).first
-        if loc.count() > 0 and loc.is_visible():
-            return loc, sel
-    return None, None
-
-
-def click_item_search_reset(modal, page) -> None:
-    """입고상품추가 팝업에서 '초기화' 버튼을 클릭합니다."""
-    reset_candidates = [
-        "#initBtn",
-        "#resetBtn",
-        'button#initBtn',
-        'button#resetBtn',
-        'button:has-text("초기화")',
-        '.btn:has-text("초기화")',
-    ]
-    btn, _ = _first_visible_in_modal(modal, reset_candidates)
-    if not btn:
-        raise ValueError("입고상품추가 팝업의 '초기화' 버튼을 찾지 못했습니다.")
-    btn.click()
     page.wait_for_load_state("domcontentloaded")
     page.wait_for_timeout(800)
 
-
-def fallback_pick_first_item_after_reset(
-    modal, page, *, search_keyword: str
-) -> int:
-    """검색 실패 시 초기화 후 목록 첫 번째 상품을 선택할 수 있게 합니다."""
-    click_item_search_reset(modal, page)
-    row_count = _wait_item_search_results(modal, timeout_ms=10_000)
+    row_count = _wait_item_search_results(modal)
     if row_count == 0:
+        # Enter 키로 한 번 더 시도
+        txt_input.press("Enter")
         page.wait_for_timeout(1000)
-        row_count = _wait_item_search_results(modal, timeout_ms=5_000)
-    return row_count
+        row_count = _wait_item_search_results(modal, timeout_ms=8000)
 
-
-def _is_item_add_modal_open(page) -> bool:
-    """입고상품추가 팝업이 열려 있는지 확인합니다."""
-    modal = page.locator(".modal.show").filter(
-        has=page.locator('input#searchTxt, input[name="searchTxt"]')
-    ).first
-    return modal.count() > 0 and modal.is_visible()
-
-
-def _user_completed_item_add(page) -> bool:
-    """본 화면에 상품 행이 있고 입고상품추가 팝업이 닫혔는지 확인합니다."""
-    if _is_item_add_modal_open(page):
-        return False
-    row = page.locator("#grid-table .tabulator-row").first
-    return row.count() > 0 and row.is_visible()
-
-
-def wait_for_user_item_pick_enter(page) -> str:
-    """초기화 후에도 상품이 없을 때 사용자 선택 후 Enter를 받습니다.
-
-    Returns:
-        "user_completed" — 사용자가 팝업에서 추가·닫기까지 완료
-        "modal_ready" — 팝업에 검색 결과가 있어 자동 추가 가능
-    """
-    print(
-        "\n[안내] 초기화 후에도 선택 가능한 상품이 없습니다.\n"
-        "  입고상품추가 팝업에서 상품을 검색·선택해 주세요.\n"
-        "  · 팝업에서 '추가'·'닫기'까지 직접 하셨다면 Enter만 누르세요.\n"
-        "  · 검색 결과만 보이면 Enter 후 첫 번째 행을 자동 추가합니다.",
-        flush=True,
-    )
-    try:
-        input("상품 선택(또는 추가·닫기) 완료 후 Enter: ")
-    except EOFError:
+    if row_count == 0:
         pass
+    else:
 
-    if _user_completed_item_add(page):
-        return "user_completed"
 
-    if _is_item_add_modal_open(page):
-        modal = _get_item_add_modal(page)
-        if _wait_item_search_results(modal, timeout_ms=3_000) > 0:
-            return "modal_ready"
-
-    raise ValueError(
-        "입고상품 선택을 확인하지 못했습니다. "
-        "팝업에서 상품을 선택했는지 확인해 주세요."
-    )
+        pass
 
 
 def _fill_put_plan_unit_qty(modal, page, qty: str) -> None:
-    """팝업 검색 결과 첫 행의 입고수량(put_plan_unit_qty)에 수량을 입력합니다."""
+    """검색 결과 첫 행의 입고수량(put_plan_unit_qty)에 수량을 입력합니다."""
     row = modal.locator("#grid-table .tabulator-row, .tabulator-row").first
     row.wait_for(state="visible", timeout=10_000)
 
-    qty_input = row.locator(
-        'input#put_plan_unit_qty, input[name="put_plan_unit_qty"]'
-    ).first
-    if qty_input.count() == 0 or not qty_input.is_visible():
-        qty_input = modal.locator(
-            'input#put_plan_unit_qty, input[name="put_plan_unit_qty"]'
-        ).first
-    if qty_input.count() == 0 or not qty_input.is_visible():
-        raise ValueError("입고수량(put_plan_unit_qty) 입력 요소를 찾지 못했습니다.")
+    qty_cell = row.locator('[tabulator-field="put_plan_unit_qty"]').first
+    if qty_cell.count() == 0:
+        raise ValueError("입고수량(put_plan_unit_qty) 셀을 찾지 못했습니다.")
 
-    qty_input.click()
-    qty_input.fill("")
-    qty_input.fill(qty)
-    qty_input.evaluate(
-        """(el) => {
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-            el.dispatchEvent(new Event('change', { bubbles: true }));
-        }"""
-    )
+    qty_cell.click()
+    page.wait_for_timeout(300)
+    qty_cell.dblclick()
+    page.wait_for_timeout(400)
+
+    qty_input = qty_cell.locator("input").first
+    if qty_input.count() == 0 or not qty_input.is_visible():
+        qty_input = modal.locator(".tabulator-editing input").first
+    if qty_input.count() == 0 or not qty_input.is_visible():
+        qty_input = page.locator(".tabulator-editing input").first
+
+    if qty_input.count() > 0 and qty_input.is_visible():
+        qty_input.fill("")
+        qty_input.fill(qty)
+    else:
+        qty_cell.evaluate(
+            """(el, value) => {
+                let input = el.querySelector('input');
+                if (!input) {
+                    input = document.createElement('input');
+                    el.appendChild(input);
+                }
+                input.value = value;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+            }""",
+            qty,
+        )
+
     page.wait_for_timeout(300)
 
 
@@ -474,79 +439,6 @@ def click_item_add_modal_close(modal, page) -> None:
         modal.wait_for(state="hidden", timeout=8000)
     except PlaywrightTimeoutError:
         pass
-
-
-def _modal_row_has_field(row, field_name: str) -> bool:
-    """팝업 그리드 행에 지정 열이 있는지 확인합니다."""
-    return row.locator(f'[tabulator-field="{field_name}"]').count() > 0
-
-
-def _scroll_modal_grid_to_field(modal, page, field_name: str) -> None:
-    """팝업 그리드 가로 스크롤로 지정 열을 화면에 보이게 합니다."""
-    page.evaluate(
-        """(fieldName) => {
-            const modal = Array.from(document.querySelectorAll('.modal.show'))
-                .find((m) => m.querySelector('input#searchTxt, input[name="searchTxt"]'));
-            if (!modal) return;
-            const cell = modal.querySelector(`[tabulator-field="${fieldName}"]`);
-            if (!cell) return;
-            const holder = modal.querySelector('.tabulator-tableholder');
-            if (holder) {
-                const left = cell.offsetLeft - holder.clientWidth / 3;
-                holder.scrollLeft = Math.max(0, left);
-            }
-            cell.scrollIntoView({ block: 'nearest', inline: 'center' });
-        }""",
-        field_name,
-    )
-    page.wait_for_timeout(400)
-
-
-def _modal_has_date_fields(modal, page) -> bool:
-    """팝업 검색 행에 제조일자·소비기한 열이 모두 있는지 확인합니다."""
-    row = _get_modal_item_grid_row(modal)
-    for field_name in ("prod_mnfctur_dt", "prod_expir_dt"):
-        _scroll_modal_grid_to_field(modal, page, field_name)
-    return (
-        _modal_row_has_field(row, "prod_mnfctur_dt")
-        and _modal_row_has_field(row, "prod_expir_dt")
-    )
-
-
-def _complete_item_add_in_modal(modal, page, qty: str) -> bool:
-    """팝업에서 제조일자·소비기한·수량 입력 → 추가 → 닫기까지 진행합니다.
-
-    Returns:
-        True — 제조일자·소비기한을 팝업에서 입력함
-        False — 팝업에 날짜 열 없음, 수량만 입력 후 본 화면에서 날짜 입력 필요
-    """
-    mnfctur_dt = datetime.now().strftime("%Y%m%d")
-    expir_dt = (datetime.now() + timedelta(days=365)).strftime("%Y%m%d")
-    dates_in_modal = _modal_has_date_fields(modal, page)
-
-    if dates_in_modal:
-        _scroll_modal_grid_to_field(modal, page, "prod_mnfctur_dt")
-        _fill_modal_datepicker_field(
-            modal,
-            page,
-            field_name="prod_mnfctur_dt",
-            value_yyyymmdd=mnfctur_dt,
-            label="제조일자",
-        )
-        _scroll_modal_grid_to_field(modal, page, "prod_expir_dt")
-        _fill_modal_datepicker_field(
-            modal,
-            page,
-            field_name="prod_expir_dt",
-            value_yyyymmdd=expir_dt,
-            label="소비기한",
-        )
-        _scroll_modal_grid_to_field(modal, page, "put_plan_unit_qty")
-
-    _fill_put_plan_unit_qty(modal, page, qty)
-    click_add_item_button(modal, page)
-    click_item_add_modal_close(modal, page)
-    return dates_in_modal
 
 
 def _fill_grid_input_field(
@@ -605,59 +497,6 @@ def fill_lot_number(page, stamp_yymmddhh: str) -> None:
         value=f"L{stamp_yymmddhh}",
         label="로트번호",
     )
-
-
-def _get_modal_item_grid_row(modal):
-    """입고상품추가 팝업 그리드의 첫 데이터 행을 반환합니다."""
-    row = modal.locator("#grid-table .tabulator-row, .tabulator-row").first
-    row.wait_for(state="visible", timeout=10_000)
-    row.scroll_into_view_if_needed()
-    return row
-
-
-def _fill_modal_datepicker_field(
-    modal,
-    page,
-    *,
-    field_name: str,
-    value_yyyymmdd: str,
-    label: str,
-) -> None:
-    """팝업 Tabulator datepicker에 YYYYMMDD를 입력합니다."""
-    row = _get_modal_item_grid_row(modal)
-    _activate_grid_cell(row, field_name)
-
-    field_input = _find_date_input(row, page, field_name)
-    if field_input is None:
-        raise ValueError(f"{label}({field_name}) datepicker 입력란을 찾지 못했습니다.")
-
-    applied = _type_date_manually(page, field_input, value_yyyymmdd)
-
-    if not applied:
-        value_dashed = (
-            f"{value_yyyymmdd[0:4]}-{value_yyyymmdd[4:6]}-{value_yyyymmdd[6:8]}"
-            if len(value_yyyymmdd) == 8
-            else value_yyyymmdd
-        )
-        applied = _type_date_manually(page, field_input, value_dashed)
-
-    if not applied:
-        for candidate in (value_yyyymmdd, value_dashed):
-            if _set_date_via_jquery(field_input, candidate):
-                applied = _read_input_value(field_input)
-                if applied:
-                    break
-        _close_datepicker_if_open(page)
-
-    cell_text = _read_grid_cell_text(row, field_name)
-    if not applied and cell_text:
-        applied = cell_text
-
-    if not applied:
-        raise ValueError(
-            f"{label}({field_name}) 값이 반영되지 않았습니다. "
-            f"시도값: {value_yyyymmdd}, 셀표시: {cell_text!r}"
-        )
 
 
 def _get_item_grid_row(page):
@@ -731,7 +570,6 @@ def _activate_grid_cell(row, field_name: str) -> None:
     cell = row.locator(f'[tabulator-field="{field_name}"]').first
     if cell.count() == 0:
         raise ValueError(f"그리드 셀을 찾지 못했습니다: {field_name}")
-    cell.scroll_into_view_if_needed()
     cell.click()
     page_wait = cell.page
     page_wait.wait_for_timeout(300)
@@ -807,6 +645,7 @@ def _fill_datepicker_grid_field(
         )
 
 
+
 def fill_manufacturing_date(page) -> None:
     """본 화면 제조일자(prod_mnfctur_dt)에 오늘 날짜(YYYYMMDD)를 입력합니다."""
     mnfctur_dt = datetime.now().strftime("%Y%m%d")
@@ -830,39 +669,24 @@ def fill_expiration_date(page) -> None:
 
 
 def run_item_add_flow(page, config: Dict) -> None:
-    """입고상품추가 팝업: 검색 → 제조일자·소비기한·수량 → 추가·닫기 → 배치번호 입력."""
+    """입고상품추가 팝업: 검색 → 수량입력 → 추가 → 닫기 → 배치번호 입력."""
     qty = str(config.get("item_put_plan_qty", "10")).strip()
     stamp_yymmddhh = datetime.now().strftime("%y%m%d%H")
 
     click_item_register_button(page)
     page.wait_for_timeout(1200)
 
-    search_keyword = (config.get("item_search_keyword") or "").strip()
-    row_count = search_item_in_add_popup(page, config)
-    modal = _get_item_add_modal(page)
-    if row_count == 0:
-        row_count = fallback_pick_first_item_after_reset(
-            modal, page, search_keyword=search_keyword
-        )
-
-    user_already_added = False
-    dates_filled_in_modal = False
-    if row_count == 0:
-        pick_status = wait_for_user_item_pick_enter(page)
-        user_already_added = pick_status == "user_completed"
-
-    if not user_already_added:
+    with popup_page_zoom(page, config):
+        search_item_in_add_popup(page, config)
         modal = _get_item_add_modal(page)
-        if _wait_item_search_results(modal, timeout_ms=3_000) == 0:
-            raise ValueError(
-                f"'{search_keyword}' 검색·초기화 후에도 "
-                "선택 가능한 상품이 없습니다."
-            )
-        dates_filled_in_modal = _complete_item_add_in_modal(modal, page, qty)
+        _fill_put_plan_unit_qty(modal, page, qty)
+        click_add_item_button(modal, page)
+        click_item_add_modal_close(modal, page)
 
-    fill_batch_number(page, stamp_yymmddhh)
-    fill_lot_number(page, stamp_yymmddhh)
-    if user_already_added or not dates_filled_in_modal:
+    # 그리드·datepicker는 줌 100%에서 수기 입력과 동일하게 타이핑합니다.
+    with popup_page_zoom(page, config):
+        fill_batch_number(page, stamp_yymmddhh)
+        fill_lot_number(page, stamp_yymmddhh)
         fill_manufacturing_date(page)
         fill_expiration_date(page)
 
@@ -933,6 +757,10 @@ def wait_for_user_excel_upload(page, *, timeout_ms: int = 1_800_000) -> None:
             }""",
             timeout=timeout_ms,
         )
+        file_input = _get_excel_file_input(page)
+        file_name = file_input.evaluate(
+            "(el) => (el.files && el.files[0] && el.files[0].name) || ''"
+        )
         return
     except PlaywrightTimeoutError:
         print(
@@ -953,12 +781,13 @@ def wait_for_user_excel_upload(page, *, timeout_ms: int = 1_800_000) -> None:
 def run_excel_upload_flow(page, config: Dict) -> None:
     """엑셀 업로드 방식으로 입고상품을 등록합니다."""
     excel_path = get_configured_excel_path(config)
-    click_excel_upload_button(page)
-    if excel_path:
-        attach_excel_upload_file(page, excel_path)
-    else:
-        wait_for_user_excel_upload(page)
-    click_excel_upload_confirm_button(page)
+    with popup_page_zoom(page, config):
+        click_excel_upload_button(page)
+        if excel_path:
+            attach_excel_upload_file(page, excel_path)
+        else:
+            wait_for_user_excel_upload(page)
+        click_excel_upload_confirm_button(page)
 
 
 def click_excel_upload_button(page):
@@ -967,7 +796,7 @@ def click_excel_upload_button(page):
         "#xlsUploadBtn",
         'button:has-text("엑셀 업로드")',
     ]
-    btn, _ = first_visible_locator(page, btn_candidates)
+    btn, btn_sel = first_visible_locator(page, btn_candidates)
     if not btn:
         raise ValueError("'엑셀 업로드' 버튼(xlsUploadBtn)을 찾지 못했습니다.")
 
@@ -997,13 +826,15 @@ def click_excel_upload_confirm_button(page):
         "#confirmBtn",
         '#excelUploadModal button:has-text("등록")',
     ]
-    btn, _ = first_visible_locator(page, btn_candidates)
+    btn, btn_sel = first_visible_locator(page, btn_candidates)
     if not btn:
         raise ValueError("'등록' 버튼(confirmBtn)을 찾지 못했습니다.")
 
     btn.click()
 
-    if not click_popup_ok_if_visible(page, timeout_ms=30000):
+    if click_popup_ok_if_visible(page, timeout_ms=30000):
+        pass
+    else:
         raise ValueError("엑셀 업로드 성공 팝업을 찾지 못했습니다.")
 
     modal.wait_for(state="hidden", timeout=30000)
@@ -1018,7 +849,7 @@ def click_save_button(page, *, confirm_swal: bool = False):
         'button:has-text("저장")',
         '.btn.btn-primary:has-text("저장")',
     ]
-    save_btn, _ = first_visible_locator(page, save_btn_candidates)
+    save_btn, save_sel = first_visible_locator(page, save_btn_candidates)
     if not save_btn:
         raise ValueError("'저장' 버튼(saveBtn)을 찾지 못했습니다.")
 
@@ -1039,23 +870,26 @@ def click_save_button(page, *, confirm_swal: bool = False):
     if confirm_swal:
         if click_swal_confirm_if_visible(5000):
             page.wait_for_timeout(400)
-            click_swal_confirm_if_visible(3000)
-
-
-def wait_for_user_save_completion(page) -> None:
-    """저장·닫기 처리 후 사용자 Enter 입력을 기다립니다."""
-    print(
-        "\n[안내] 화면에서 저장 또는 닫기 후 종료하시려면 엔터를 눌러주세요",
-        flush=True,
-    )
-    try:
-        input()
-    except EOFError:
-        pass
+            if click_swal_confirm_if_visible(3000):
+                pass
+        else:
+            print(
+                "[경고] 저장 확인창을 찾지 못했습니다. "
+                "화면에서 직접 확인하거나 네트워크·검증 오류를 확인해 주세요."
+            )
+    else:
+        try:
+            popup.first.wait_for(state="visible", timeout=3000)
+            print("[안내] 저장 확인창이 떴습니다. '확인'은 자동으로 누르지 않았습니다.")
+        except PlaywrightTimeoutError:
+            print(
+                "[안내] 저장 버튼은 클릭했습니다. "
+                "(확인창이 늦게 뜨거나 없을 수 있습니다. 필요하면 화면에서 직접 확인해 주세요.)"
+            )
 
 
 def run():
-    """로그인 후 WMS 입고요청 등록(엑셀 업로드·저장)까지 수행합니다."""
+    """로그인 후 OMS 입고예정 등록(엑셀 업로드·저장)까지 수행합니다."""
     print_site_url_banner()
     creds = load_env_credentials()
 
@@ -1065,7 +899,7 @@ def run():
 
         try:
             ensure_login_only(page, context, CONFIG, creds, state_file=STATE_FILE)
-            goto_wm_put_req_list(page, CONFIG)
+            goto_om_put_expect_list(page, CONFIG)
             click_inbound_register_button(page)
             select_depot_cd(page, CONFIG.get("depot_label", "구로센터"))
             select_vendor_cd(page)
@@ -1078,7 +912,15 @@ def run():
                 run_excel_upload_flow(page, CONFIG)
 
             click_save_button(page)
-            wait_for_user_save_completion(page)
+            done_msg = (
+                "입고상품추가·저장"
+                if item_method == "1"
+                else "엑셀 업로드·저장"
+            )
+            try:
+                input("확인창에서 직접 처리하신 뒤, 종료하려면 Enter를 누르세요...")
+            except EOFError:
+                pass
         except PlaywrightTimeoutError:
             raise
         finally:

@@ -15,7 +15,7 @@ from Mate2QA_login import (
     ensure_login_only,
     load_env_credentials,
 )
-from Mate2QA_site_config import CONFIG, STATE_FILE_DOMESTIC, print_site_url_banner
+from Mate2QA_site_config import CONFIG, STATE_FILE_DOMESTIC, print_site_url_banner, refresh_config_from_env
 from Mate2QA_wm_wave_search import (
     apply_wm_wave_search,
     capture_wave_selected_row_context,
@@ -36,38 +36,34 @@ def goto_out_expect_list(page, config: Dict):
     """WMS 출고예정 목록 화면으로 이동합니다."""
     page.goto(config["out_expect_list_url"], wait_until="domcontentloaded")
     page.wait_for_timeout(1000)
-    print(f"[안내] WMS 출고예정 목록으로 이동했습니다. 현재 URL: {page.url}")
 
 
 def goto_out_wave_list(page, config: Dict):
     """WMS 웨이브 목록 화면으로 이동합니다."""
     page.goto(config["out_wave_list_url"], wait_until="domcontentloaded")
     page.wait_for_timeout(1000)
-    print(f"[안내] WMS 웨이브 목록으로 이동했습니다. 현재 URL: {page.url}")
 
 
 def run():
     """로그인 → 출고예정 WAVE → 웨이브 검색 → 주소정제 → 출고차수할당."""
     print_site_url_banner()
-    creds = load_env_credentials()
+    config = refresh_config_from_env(CONFIG)
+    creds = load_env_credentials(config["login_url"])
 
     with sync_playwright() as p:
-        browser, context = create_context(p, CONFIG, state_file=STATE_FILE)
+        browser, context = create_context(p, config, state_file=STATE_FILE)
         page = context.new_page()
 
         try:
-            ensure_login_only(page, context, CONFIG, creds, state_file=STATE_FILE)
-            goto_out_expect_list(page, CONFIG)
+            config = ensure_login_only(page, context, config, creds, state_file=STATE_FILE)
+            goto_out_expect_list(page, config)
 
-            print(
-                "[안내] 출고예정: #searchDateRange 날짜 · #sach_cd 채널 · "
-                "#searchColumn · #srch_txt 설정 → "
-                "「검색」 → 이동할 주문 체크 후 Enter..."
-            )
             try:
                 input("준비되면 Enter...")
             except EOFError:
-                print("[안내] 표준 입력 없음 - 현재 화면 기준으로 진행합니다.")
+
+
+                pass
 
             filter_data = capture_wm_wave_filter_from_page(page)
             if not filter_data.get("selected_od_snos"):
@@ -79,17 +75,17 @@ def run():
             run_wave_process_on_expect_list(page, filter_data)
 
             if "outWaveList.do" not in page.url:
-                goto_out_wave_list(page, CONFIG)
+                goto_out_wave_list(page, config)
 
             apply_wm_wave_search(page, filter_data, select_orders=True)
             filter_data = capture_wave_selected_row_context(page, filter_data)
 
             if is_dlvr_div_empty(filter_data):
-                print("[안내] 배송구분이 비어 있어 주소 정제 단계를 건너뜁니다.")
+                pass
             else:
                 click_address_refine(page)
 
-            click_out_alloc_assign(page, CONFIG["out_alloc_rgst_url"])
+            click_out_alloc_assign(page, config["out_alloc_rgst_url"])
             fill_out_alloc_rgst_form(page, filter_data)
             select_all_alloc_rgst_targets(page)
             click_out_alloc_rgst_button(page)
@@ -97,14 +93,14 @@ def run():
             try:
                 input("팝업 확인 후 다음 단계로 넘기려면 Enter...")
             except EOFError:
-                print("[안내] 표준 입력이 없어 Enter 대기를 건너뜁니다.")
+
+                pass
 
             try:
                 input("작업을 마치고 종료하려면 Enter...")
             except EOFError:
-                print("[안내] 표준 입력이 없어 Enter 대기를 건너뜁니다.")
+                pass
         except PlaywrightTimeoutError:
-            print("[오류] 페이지 로딩이 지연되었습니다. URL/네트워크/selector를 확인해 주세요.")
             raise
         finally:
             context.storage_state(path=str(STATE_FILE))

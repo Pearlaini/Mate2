@@ -13,21 +13,37 @@
 import os
 
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 from urllib.parse import urlparse
 from dotenv import load_dotenv
 
-_ENV_PATH = Path(__file__).resolve().parent / "Mate2QA_login.env"
+# Mate2QA 스크립트·설정 파일이 있는 프로젝트 루트 (실행 cwd와 무관)
+PROJECT_DIR = Path(__file__).resolve().parent
+_ENV_PATH = PROJECT_DIR / "Mate2QA_login.env"
+
+
+def project_path(*parts: str) -> Path:
+    """프로젝트 루트 기준 상대 경로를 절대 Path로 만듭니다."""
+    return PROJECT_DIR.joinpath(*parts)
+
+
+# 로컬 파일 (프로젝트 폴더 기준, cwd와 무관)
+STATE_FILE_DOMESTIC = project_path("storage_state_domestic.json")
+STATE_FILE_DEFAULT = project_path("storage_state.json")
+SEARCH_FILTER_DOMESTIC_FILE = project_path("search_filter_domestic.json")
+SEARCH_FILTER_WM_WAVE_FILE = project_path("search_filter_wm_wave.json")
+DEFAULT_EXCEL_UPLOAD_FILE = project_path("샘플_입고요청.xlsx")
 
 
 # =========================
 # 로그인 페이지 URL만 바꾸면, 아래 경로가 같은 서버에 붙습니다.
 # (또는 Mate2QA_login.env에 LOGIN_URL=... 설정)
-# "https://qa-oms.ourbox.co.kr/om/login/login.do"
-# "https://dev-kdash-oms.shopeasy.co.kr:8443/om/login/login.do"#
 # =========================
 
-_DEFAULT_LOGIN_URL = "https://qa-oms.ourbox.co.kr/om/login/login.do"
+# env 미설정 시 사용 (호스트·scheme은 Mate2QA_login.env의 OMS_HOST 등으로 변경 가능)
+_DEFAULT_OMS_SCHEME = "https"
+_DEFAULT_OMS_HOST = "qa-oms.ourbox.co.kr"
+LOGIN_PATH = "/om/login/login.do"
 
 
 # 로그인 URL의 호스트(scheme://host) 뒤에 붙이는 경로
@@ -40,7 +56,9 @@ OUT_EXPECT_LIST_PATH = "/wm/out/reg/outExpectList.do"
 OUT_WAVE_LIST_PATH = "/wm/out/wave/outWaveList.do"
 OUT_ALLOC_RGST_PATH = "/wm/out/alloc/outAllocRgst.do"
 OUT_WK_ORD_LIST_PATH = "/wm/out/wk/ord/outWkOrdList.do"
-STATE_FILE_DOMESTIC = Path("storage_state_domestic.json")
+WM_PUT_REQ_LIST_PATH = "/wm/put/req/reqList.do"
+SACH_STOCK_LIST_PATH = "/wm/stock/sach/sachList.do"
+ITEM_TRNSF_LIST_PATH = "/wm/stock/trnsf/itemTrnsfList.do"
 
 
 def join_origin_path(login_url: str, path: str) -> str:
@@ -65,9 +83,9 @@ def join_origin_path(login_url: str, path: str) -> str:
 
 def _resolve_login_url() -> str:
 
-    load_dotenv(_ENV_PATH)
+    load_dotenv(_ENV_PATH, override=True)
 
-    load_dotenv("Mate2QA_login.env")
+    load_dotenv(PROJECT_DIR / "Mate2QA_login.env", override=True)
 
     login = os.getenv("LOGIN_URL", "").strip()
 
@@ -87,7 +105,9 @@ def _resolve_login_url() -> str:
 
             return f"{parsed.scheme}://{parsed.netloc}/om/login/login.do"
 
-    return _DEFAULT_LOGIN_URL
+    scheme = os.getenv("OMS_SCHEME", _DEFAULT_OMS_SCHEME).strip() or _DEFAULT_OMS_SCHEME
+    host = os.getenv("OMS_HOST", _DEFAULT_OMS_HOST).strip() or _DEFAULT_OMS_HOST
+    return f"{scheme}://{host}{LOGIN_PATH}"
 
 
 
@@ -148,32 +168,57 @@ def get_out_wk_ord_list_url(login_url: str = LOGIN_URL) -> str:
     return join_origin_path(login_url, OUT_WK_ORD_LIST_PATH)
 
 
+def get_wm_put_req_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, WM_PUT_REQ_LIST_PATH)
 
 
+def get_sach_stock_list_url(login_url: str = LOGIN_URL) -> str:
 
-def build_playwright_config() -> Dict:
+    return join_origin_path(login_url, SACH_STOCK_LIST_PATH)
+
+
+def get_item_trnsf_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, ITEM_TRNSF_LIST_PATH)
+
+
+def build_playwright_config(login_url: Optional[str] = None) -> Dict:
 
     """Playwright·로그인 모듈에 넘길 CONFIG dict."""
 
+    resolved_login = (login_url or _resolve_login_url()).strip()
+
     return {
 
-        "login_url": LOGIN_URL,
+        "login_url": resolved_login,
 
-        "order_list_url": ORDER_LIST_URL,
+        "order_list_url": join_origin_path(resolved_login, ORDER_LIST_PATH),
 
-        "put_order_list_url": get_put_order_list_url(),
+        "put_order_list_url": get_put_order_list_url(resolved_login),
 
-        "out_ready_list_url": get_out_ready_list_url(),
+        "out_ready_list_url": get_out_ready_list_url(resolved_login),
 
-        "order_register_url": get_order_register_url(),
+        "order_register_url": get_order_register_url(resolved_login),
 
-        "out_expect_list_url": get_out_expect_list_url(),
+        "out_expect_list_url": get_out_expect_list_url(resolved_login),
 
-        "out_wave_list_url": get_out_wave_list_url(),
+        "out_wave_list_url": get_out_wave_list_url(resolved_login),
 
-        "out_alloc_rgst_url": get_out_alloc_rgst_url(),
+        "out_alloc_rgst_url": get_out_alloc_rgst_url(resolved_login),
 
-        "out_wk_ord_list_url": get_out_wk_ord_list_url(),
+        "out_wk_ord_list_url": get_out_wk_ord_list_url(resolved_login),
+
+        "wm_put_req_list_url": get_wm_put_req_list_url(resolved_login),
+
+        "sach_stock_list_url": get_sach_stock_list_url(resolved_login),
+
+        "item_trnsf_list_url": get_item_trnsf_list_url(resolved_login),
+
+        "excel_upload_file_path": (
+            os.getenv("EXCEL_UPLOAD_FILE", "").strip()
+            or str(DEFAULT_EXCEL_UPLOAD_FILE)
+        ),
 
         "headless": False,
 
@@ -187,6 +232,9 @@ def build_playwright_config() -> Dict:
         "start_maximized": True,
 
         "page_zoom": 0.8,
+
+        # 주소/모달 팝업 구간만 1.0 (팝업 클릭·backdrop 오류 방지)
+        "page_zoom_popup": 1.0,
 
         "selectors": {
 
@@ -207,28 +255,19 @@ def build_playwright_config() -> Dict:
 CONFIG = build_playwright_config()
 
 
+def refresh_config_from_env(base: Optional[Dict] = None) -> Dict:
+    """env 파일을 다시 읽어 login_url·하위 URL을 최신으로 맞춥니다."""
+    src = base or CONFIG
+    fresh = build_playwright_config()
+    return {**src, **fresh}
+
 
 CONFIG_FILE = Path(__file__).resolve()
 
 
 def print_site_url_banner() -> None:
-    """스크립트 시작 시 URL 설정 위치를 터미널에 안내합니다."""
-    cfg = CONFIG
-    print("=" * 62)
-    print("[사이트 URL] 다른 사이트로 바꿀 때 수정하는 곳:")
-    print(f"  ① {CONFIG_FILE.name}  →  _DEFAULT_LOGIN_URL (로그인, 약 21행)")
-    print(f"  ② {CONFIG_FILE.name}  →  ORDER_LIST_PATH 등 경로 (약 24행~)")
-    print("  ③ Mate2QA_login.env  →  LOGIN_URL=... (있으면 ①보다 우선)")
-    print("  ④ 안내 문서: Mate2QA_URL설정안내.md")
-    print(f"[현재] 로그인:     {cfg['login_url']}")
-    print(f"[현재] 주문목록:   {cfg['order_list_url']}")
-    print(f"[현재] 주문서처리: {cfg['put_order_list_url']}")
-    print(f"[현재] 출고준비:   {cfg['out_ready_list_url']}")
-    print(f"[현재] 출고예정:   {cfg['out_expect_list_url']}")
-    print(f"[현재] WAVE목록:   {cfg['out_wave_list_url']}")
-    print(f"[현재] 출고차수:   {cfg['out_alloc_rgst_url']}")
-    print(f"[현재] 출고작업:   {cfg['out_wk_ord_list_url']}")
-    print("=" * 62)
+    """스크립트 시작 시 URL 배너 출력 (현재 비활성)."""
+    pass
 
 
 if __name__ == "__main__":

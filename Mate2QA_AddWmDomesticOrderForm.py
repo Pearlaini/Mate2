@@ -11,6 +11,7 @@ from Mate2QA_login import (
     ensure_login_only,
     first_visible_locator,
     load_env_credentials,
+    popup_page_zoom,
 )
 from Mate2QA_site_config import (
     CONFIG as _SITE_CONFIG,
@@ -40,7 +41,6 @@ def goto_out_expect_list(page, config: Dict) -> None:
     url = join_origin_path(config["login_url"], path)
     page.goto(url, wait_until="domcontentloaded")
     page.wait_for_timeout(1000)
-    print(f"[안내] WMS 출고예정 목록으로 이동했습니다. 현재 URL: {page.url}")
 
 
 def click_out_expect_manual_register(page) -> None:
@@ -55,11 +55,9 @@ def click_out_expect_manual_register(page) -> None:
     if not btn:
         raise ValueError("'출고 수기등록' 버튼(#outExpectRgstBtn)을 찾지 못했습니다.")
 
-    print(f"[디버그] 출고 수기등록 버튼 셀렉터: {btn_sel}")
     btn.click()
     page.wait_for_load_state("domcontentloaded")
     page.wait_for_timeout(1000)
-    print(f"[안내] '출고 수기등록' 버튼 클릭 완료. 현재 URL: {page.url}")
 
 
 def fill_field(page, field_name: str, value: str, *, required: bool = True) -> None:
@@ -73,7 +71,6 @@ def fill_field(page, field_name: str, value: str, *, required: bool = True) -> N
     if not field:
         if required:
             raise ValueError(f"{field_name} 입력 요소를 찾지 못했습니다.")
-        print(f"[경고] {field_name} 입력 요소를 찾지 못해 건너뜁니다.")
         return
     try:
         blocked = field.evaluate("(el) => !!(el.readOnly || el.disabled)")
@@ -82,11 +79,9 @@ def fill_field(page, field_name: str, value: str, *, required: bool = True) -> N
     if blocked:
         if required:
             raise ValueError(f"{field_name} 입력 요소가 읽기 전용·비활성입니다.")
-        print(f"[경고] {field_name}이(가) 읽기 전용·비활성이라 건너뜁니다.")
         return
     field.fill(value)
     safe_value = value.encode("cp949", errors="replace").decode("cp949")
-    print(f"[안내] {field_name}='{safe_value}' 입력 완료 (selector: {sel})")
 
 
 def select_sach_cd(page, option_value: str) -> None:
@@ -115,7 +110,6 @@ def select_sach_cd(page, option_value: str) -> None:
     )
     if not picked:
         raise ValueError(f"sach_cd에서 value={option_value}(J채널)을 선택하지 못했습니다.")
-    print(f"[안내] sach_cd='{picked}'(J채널) 선택 완료")
 
 
 def _root_wait_ms(root: Union[Page, Frame], ms: int) -> None:
@@ -141,7 +135,6 @@ def _click_recvr_address_search_trigger(page: Page) -> bool:
     if not loc:
         return False
     loc.click()
-    print(f"[안내] 수취인 주소 검색 트리거 클릭 (selector: {sel})")
     return True
 
 
@@ -224,9 +217,9 @@ def _trigger_address_search(root: Union[Page, Frame], region) -> None:
         }"""
     )
     if clicked:
-        print(f"[안내] 주소 검색 보조 클릭 ({clicked})")
+        pass
     else:
-        print("[안내] 주소 검색 Enter 키 전송 완료")
+        pass
     host_page.wait_for_timeout(800)
 
 
@@ -238,7 +231,6 @@ def _submit_address_keyword(root: Union[Page, Frame], keyword: str) -> None:
 
     region.click(force=True)
     region.fill(keyword, force=True)
-    print(f"[안내] 주소 검색어 입력: {keyword}")
 
     _trigger_address_search(root, region)
     _wait_address_search_results(root)
@@ -256,7 +248,6 @@ def _wait_address_search_results(root: Union[Page, Frame], timeout_ms: int = 10_
     for sel in first_item_selectors:
         try:
             root.locator(sel).first.wait_for(state="visible", timeout=timeout_ms)
-            print(f"[안내] 주소 검색 결과(첫 항목) 표시 확인 ({sel})")
             return
         except PlaywrightTimeoutError:
             continue
@@ -304,10 +295,6 @@ def _wait_recvr_base_address_filled(page: Page, timeout_ms: int = 8000) -> None:
             timeout=timeout_ms,
         )
         values = _get_recvr_address_values(page)
-        print(
-            "[안내] 수취인 주소 반영 확인: "
-            f"recvr_zipcd='{values.get('zip', '')}', recvr_addr='{values.get('addr', '')[:60]}'"
-        )
     except PlaywrightTimeoutError as exc:
         values = _get_recvr_address_values(page)
         raise ValueError(
@@ -380,24 +367,18 @@ def _click_first_address_search_result(
                 loc.click(timeout=8000, force=True)
                 text = (loc.inner_text(timeout=2000) or "").strip()[:80]
                 scope_name = "iframe" if isinstance(scope, Frame) else "page"
-                print(
-                    f"[안내] 주소 첫 항목 value 클릭 ({scope_name}, {sel}, text: {text!r})"
-                )
                 host_page.wait_for_timeout(800)
                 if _has_recvr_base_address(host_page):
                     return
-                print("[경고] 클릭 후 주소값이 아직 비어 있어 다음 후보를 시도합니다.")
             except PlaywrightTimeoutError:
                 continue
 
         js_hint = _click_first_address_via_js(scope)
         if js_hint:
             scope_name = "iframe" if isinstance(scope, Frame) else "page"
-            print(f"[안내] 주소 첫 항목 JS 클릭 ({scope_name}, {js_hint})")
             host_page.wait_for_timeout(800)
             if _has_recvr_base_address(host_page):
                 return
-            print("[경고] JS 클릭 후 주소값이 아직 비어 있어 다음 후보를 시도합니다.")
 
     # 키보드로 첫 항목 선택 (↓ + Enter)
     region = _locate_region_input(search_root)
@@ -406,7 +387,6 @@ def _click_first_address_search_result(
         host_page.wait_for_timeout(200)
         region.press("Enter")
         host_page.wait_for_timeout(800)
-        print("[안내] 주소 첫 항목 키보드(↓+Enter) 선택 시도")
         if _has_recvr_base_address(host_page):
             return
 
@@ -437,14 +417,11 @@ def _click_address_popup_close(page: Page) -> None:
     btn, sel = first_visible_locator(page, close_candidates)
     if not btn:
         page.keyboard.press("Escape")
-        print("[경고] #addrCloseBtn을 찾지 못해 Escape로 닫기 시도")
     else:
         btn.click(timeout=10_000)
-        print(f"[안내] 주소 팝업 '닫기' 클릭 (selector: {sel})")
 
     try:
         page.locator("#zip_layer").first.wait_for(state="hidden", timeout=8000)
-        print("[안내] 주소 팝업(#zip_layer) 닫힘 확인")
     except PlaywrightTimeoutError:
         page.evaluate(
             """() => {
@@ -457,7 +434,6 @@ def _click_address_popup_close(page: Page) -> None:
                 document.querySelectorAll('.modal-backdrop').forEach((el) => el.remove());
             }"""
         )
-        print("[안내] 주소 팝업(#zip_layer) JS로 닫기 처리")
     page.wait_for_timeout(400)
 
 
@@ -474,42 +450,43 @@ def fill_recvr_address_via_popup(page: Page, config: Dict) -> None:
     keyword = config.get("address_search_keyword", "지플러스타워")
     pages_before = len(page.context.pages)
 
-    if not _click_recvr_address_search_trigger(page):
-        raise ValueError("수취인 주소 검색 버튼(zipModal)을 찾지 못했습니다.")
+    with popup_page_zoom(page, config) as register_popup_zoom:
+        if not _click_recvr_address_search_trigger(page):
+            raise ValueError("수취인 주소 검색 버튼(zipModal)을 찾지 못했습니다.")
 
-    page.wait_for_timeout(1200)
-    try:
-        page.wait_for_load_state("domcontentloaded", timeout=15000)
-    except PlaywrightTimeoutError:
-        pass
-
-    if len(page.context.pages) > pages_before:
-        popup = page.context.pages[-1]
-        print(f"[안내] 주소 검색 새 창 감지. URL: {popup.url}")
-        search_host = popup
-    else:
-        search_host = page
-
-    root = _find_address_search_root(search_host)
-    if root is None:
-        raise ValueError(
-            "주소 검색 화면(iframe/새 창)에서 region_name 입력칸을 찾지 못했습니다."
-        )
-
-    _submit_address_keyword(root, keyword)
-    _click_first_address_search_result(page, root)
-    page.wait_for_timeout(800)
-
-    if search_host is not page and not search_host.is_closed():
+        page.wait_for_timeout(1200)
         try:
-            search_host.close()
-            page.bring_to_front()
-        except Exception:
+            page.wait_for_load_state("domcontentloaded", timeout=15000)
+        except PlaywrightTimeoutError:
             pass
 
-    _wait_recvr_base_address_filled(page)
-    _click_address_popup_close(page)
-    page.wait_for_timeout(300)
+        if len(page.context.pages) > pages_before:
+            popup = page.context.pages[-1]
+            register_popup_zoom(popup)
+            search_host = popup
+        else:
+            search_host = page
+
+        root = _find_address_search_root(search_host)
+        if root is None:
+            raise ValueError(
+                "주소 검색 화면(iframe/새 창)에서 region_name 입력칸을 찾지 못했습니다."
+            )
+
+        _submit_address_keyword(root, keyword)
+        _click_first_address_search_result(page, root)
+        page.wait_for_timeout(800)
+
+        if search_host is not page and not search_host.is_closed():
+            try:
+                search_host.close()
+                page.bring_to_front()
+            except Exception:
+                pass
+
+        _wait_recvr_base_address_filled(page)
+        _click_address_popup_close(page)
+        page.wait_for_timeout(300)
 
 
 def _stamp_1mddhhmm(now: datetime) -> str:
@@ -531,10 +508,6 @@ def fill_wm_manual_register_form(page, config: Dict, now: datetime) -> None:
     stamp_1mddhhmm = _stamp_1mddhhmm(now)
     mobile = f"010{stamp_1mddhhmm}"
 
-    print(f"[안내] YYMMDDHHMM: {stamp_yymmddhhmm}")
-    print(f"[안내] YYYYMMDDHHMM: {stamp_yyyymmddhhmm}")
-    print(f"[안내] MMDDHHMM: {stamp_mmddhhmm}")
-    print(f"[안내] 1MDDHHMM(전화): {stamp_1mddhhmm}")
 
     page.wait_for_timeout(500)
 
@@ -548,8 +521,8 @@ def fill_wm_manual_register_form(page, config: Dict, now: datetime) -> None:
 
     fill_field(page, "mall_od_no", f"J{stamp_yyyymmddhhmm}", required=False)
     select_sach_cd(page, config.get("sach_cd_value", "SACH0020"))
-    fill_field(page, "dlvr_msg", "WM수기등록", required=False)
-    fill_field(page, "remark_ct", "WMWM수기등록", required=False)
+    fill_field(page, "dlvr_msg", "부재시 전화주세요.", required=False)
+    fill_field(page, "remark_ct", "WM수기등록건 입니다.", required=False)
 
 
 def click_add_outbound_item_button(page) -> None:
@@ -563,7 +536,6 @@ def click_add_outbound_item_button(page) -> None:
     if not btn:
         raise ValueError("'출고대상 품목' 버튼(#addBtn)을 찾지 못했습니다.")
 
-    print(f"[디버그] 출고대상 품목 버튼 셀렉터: {btn_sel}")
     _close_zip_address_modal(page)
     try:
         btn.click(timeout=10_000)
@@ -579,9 +551,13 @@ def click_add_outbound_item_button(page) -> None:
         page.wait_for_timeout(1000)
         popup, popup_sel = first_visible_locator(page, popup_candidates)
     if popup:
-        print(f"[안내] 출고대상 품목 팝업 표시 확인 (selector: {popup_sel})")
+        pass
     else:
-        print("[경고] 출고대상 품목 버튼은 클릭했지만 팝업 표시를 확인하지 못했습니다.")
+
+
+
+
+        pass
 
 
 def search_outbound_item_popup(page, keyword: str) -> None:
@@ -598,7 +574,6 @@ def search_outbound_item_popup(page, keyword: str) -> None:
         raise ValueError("출고대상 품목 팝업에서 검색어 입력칸(#target_srch_txt)을 찾지 못했습니다.")
 
     search_input.fill(keyword)
-    print(f"[안내] 출고대상 품목 검색어 입력: {keyword}")
 
     search_btn = page.locator("#commModal #targetSearchBtn").first
     if search_btn.count() == 0:
@@ -610,7 +585,6 @@ def search_outbound_item_popup(page, keyword: str) -> None:
 
     search_btn.click(timeout=10_000)
     page.wait_for_timeout(1000)
-    print("[안내] 출고대상 품목 팝업 검색 버튼 클릭 완료")
 
 
 def run() -> None:
@@ -632,16 +606,11 @@ def run() -> None:
             search_outbound_item_popup(
                 page, CONFIG.get("target_product_search_keyword", "크래커")
             )
-            print(
-                "[안내] 출고대상 품목 팝업에서 검색까지만 완료했습니다. 이후 자동 처리는 하지 않습니다."
-            )
             try:
                 input("팝업창을 확인한 뒤 종료하려면 Enter를 누르세요...")
             except EOFError:
-                print("[안내] 표준 입력이 없어 10분 동안 팝업창을 유지합니다.")
                 page.wait_for_timeout(600_000)
         except PlaywrightTimeoutError:
-            print("[오류] 페이지 로딩이 지연되었습니다. URL/네트워크/selector를 확인해 주세요.")
             raise
         finally:
             context.storage_state(path=str(STATE_FILE))

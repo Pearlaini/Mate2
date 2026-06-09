@@ -1,9 +1,8 @@
-# QA WMS 전체 플로우 — 출고예정 → WAVE → 할당 → 출고작업 → 전체박스 추천 실행
+# QA WMS 전체 플로우 — 웨이브 → 할당 → 출고작업 → 출고확정
 #
-# 1) 출고예정: 날짜·채널·주문 선택 후 Enter → WAVE
-# 2) 웨이브 목록: 저장 조건 검색 → 주소정제(필요 시)
-# 3) 출고차수할당 → 출고차수명 JSON 저장
-# 4) 출고작업: 출고차수명 검색 → 출고지시 → 박스추천 → 전체박스 추천 실행 후 종료
+# 1) 웨이브 목록: 검색 조건·주문 선택 후 Enter
+# 2) 주소정제(필요 시) → 출고차수할당
+# 3) 출고작업: 저장된 출고차수명(#srch_txt) 검색 → 출고지시~출고확정
 #
 # 사이트 URL: Mate2QA_site_config.py (상대 path)
 
@@ -16,21 +15,33 @@ from Mate2QA_login import (
     ensure_login_only,
     load_env_credentials,
 )
+from Mate2QA_order_step import OUT_WK_ORD_PROCESSING_ERROR, abort_popup_on_messages
 from Mate2QA_site_config import CONFIG, STATE_FILE_DOMESTIC, print_site_url_banner, refresh_config_from_env
+from Mate2QA_WmMoveFromBoxtoFinal import (
+    click_alert_ok_before_picking_tab,
+    click_confirm_product_picking_list,
+    click_out_confirm_tab,
+    click_packing_instruction_tab,
+    click_packing_next_step_all,
+    click_picking_instruction_tab,
+    click_picking_next_step_to_packing,
+    open_order_manage_tab,
+    open_sach_stock_tab,
+    run_box_recommend_and_move_next,
+    search_order_by_mall_od_no,
+    select_stock_search_column_product_code,
+)
 from Mate2QA_wm_wave_search import (
     apply_wm_wave_search,
     capture_wave_selected_row_context,
-    capture_wm_wave_filter_from_page,
     click_address_refine,
     click_out_alloc_assign,
     click_out_alloc_rgst_button,
-    click_box_recommend_dropdown,
     click_out_wk_ord_instruction_tab,
-    click_total_box_recommend_btn,
     fill_out_alloc_rgst_form,
     is_dlvr_div_empty,
     load_out_tseq_nm,
-    run_wave_process_on_expect_list,
+    load_wm_wave_filter,
     search_out_wk_ord_by_tseq_nm,
     select_all_alloc_rgst_targets,
     select_out_wk_ord_row_by_tseq_nm,
@@ -39,19 +50,13 @@ from Mate2QA_wm_wave_search import (
 STATE_FILE = STATE_FILE_DOMESTIC
 
 
-def goto_out_expect_list(page, config: Dict):
-    """WMS 출고예정 목록 화면으로 이동합니다."""
-    page.goto(config["out_expect_list_url"], wait_until="domcontentloaded")
-    page.wait_for_timeout(1000)
-
-
-def goto_out_wave_list(page, config: Dict):
+def goto_out_wave_list(page, config: Dict) -> None:
     """WMS 웨이브 목록 화면으로 이동합니다."""
     page.goto(config["out_wave_list_url"], wait_until="domcontentloaded")
     page.wait_for_timeout(1000)
 
 
-def goto_out_wk_ord_list(page, config: Dict):
+def goto_out_wk_ord_list(page, config: Dict) -> None:
     """WMS 출고작업 목록 화면으로 이동합니다."""
     page.goto(config["out_wk_ord_list_url"], wait_until="domcontentloaded")
     page.locator("#srch_gubun").wait_for(state="visible", timeout=15_000)
@@ -104,8 +109,37 @@ def select_depot_cd_if_needed(page) -> None:
 
 
 
-def run():
-    """로그인 → 출고예정~할당 → 출고작업 전체박스 추천 실행까지."""
+def run_out_wk_ord_to_final(page, context, config, filter_data: Dict) -> None:
+    """출고작업 목록에서 저장된 출고차수명으로 검색 후 출고지시~출고확정까지 진행합니다."""
+    out_tseq_nm = (filter_data.get("out_tseq_nm") or "").strip() or load_out_tseq_nm()
+    if not out_tseq_nm:
+        raise ValueError(
+            "출고차수명(out_tseq_nm)이 없습니다. "
+            "출고차수할당 단계(#out_tseq_nm)에서 저장된 값을 확인해 주세요."
+        )
+    search_out_wk_ord_by_tseq_nm(page, out_tseq_nm)
+    select_out_wk_ord_row_by_tseq_nm(page, out_tseq_nm)
+    click_out_wk_ord_instruction_tab(page)
+    with abort_popup_on_messages(OUT_WK_ORD_PROCESSING_ERROR):
+        run_box_recommend_and_move_next(page)
+        click_alert_ok_before_picking_tab(page)
+        click_picking_instruction_tab(page)
+        click_picking_next_step_to_packing(page)
+        click_packing_instruction_tab(page)
+        click_packing_next_step_all(page)
+    click_out_confirm_tab(page)
+    stock_page = open_sach_stock_tab(context, config)
+    select_stock_search_column_product_code(stock_page)
+    manage_page = open_order_manage_tab(context, config)
+    search_order_by_mall_od_no(manage_page, "J")
+    page.bring_to_front()
+    page.wait_for_timeout(500)
+    click_out_confirm_tab(page)
+    click_confirm_product_picking_list(page)
+
+
+def run() -> None:
+    """로그인 → 웨이브~할당 → 출고작업 출고확정까지."""
     print_site_url_banner()
     config = refresh_config_from_env(CONFIG)
     creds = load_env_credentials(config["login_url"])
@@ -116,7 +150,7 @@ def run():
 
         try:
             config = ensure_login_only(page, context, config, creds, state_file=STATE_FILE)
-            goto_out_expect_list(page, config)
+            goto_out_wave_list(page, config)
 
             try:
                 input("준비되면 Enter...")
@@ -125,17 +159,13 @@ def run():
 
                 pass
 
-            filter_data = capture_wm_wave_filter_from_page(page)
-            if not filter_data.get("selected_od_snos"):
+            filter_data = load_wm_wave_filter()
+            if not filter_data:
                 raise ValueError(
-                    "선택된 주문(od_sno)이 없습니다. "
-                    "출고예정 목록에서 주문을 체크한 뒤 Enter를 눌러 주세요."
+                    "search_filter_wm_wave.json이 없습니다. "
+                    "웨이브 목록에서 검색·주문 선택 후 진행하거나 "
+                    "23번(출고등록~출고할당)을 먼저 실행해 주세요."
                 )
-
-            run_wave_process_on_expect_list(page, filter_data)
-
-            if "outWaveList.do" not in page.url:
-                goto_out_wave_list(page, config)
 
             apply_wm_wave_search(page, filter_data, select_orders=True)
             filter_data = capture_wave_selected_row_context(page, filter_data)
@@ -152,23 +182,10 @@ def run():
             click_out_alloc_rgst_button(page)
             wait_for_out_wk_ord_after_alloc(page, config)
 
-            out_tseq_nm = load_out_tseq_nm()
-            if not out_tseq_nm:
-                raise ValueError(
-                    "출고차수명(out_tseq_nm)이 JSON에 없습니다. "
-                    "출고차수할당 단계(fill_out_alloc_rgst_form)를 확인해 주세요."
-                )
-
-            search_out_wk_ord_by_tseq_nm(page, out_tseq_nm)
-            select_out_wk_ord_row_by_tseq_nm(page, out_tseq_nm)
-            click_out_wk_ord_instruction_tab(page)
-            click_box_recommend_dropdown(page)
-            click_total_box_recommend_btn(page)
+            run_out_wk_ord_to_final(page, context, config, filter_data)
 
             try:
-                input(
-                    "화면에서 박스추천 결과를 확인한 뒤, 종료하려면 Enter..."
-                )
+                input("출고확정/재고/피킹 리스트 확인 후 종료하려면 Enter를 누르세요...")
             except EOFError:
                 pass
         except PlaywrightTimeoutError as exc:

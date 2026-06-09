@@ -38,7 +38,6 @@ def _click_sender_dropdown_menu(page: Page) -> None:
     btn, sel = first_visible_locator(page, [SENDER_DROPDOWN_BTN])
     if not btn:
         raise ValueError("「발송인 등록」 버튼을 찾지 못했습니다.")
-    print(f"[디버그] 발송인 등록 버튼: {sel}")
     btn.click()
     page.wait_for_timeout(400)
 
@@ -52,7 +51,6 @@ def _click_sender_dropdown_menu(page: Page) -> None:
         ) from e
     menu.click()
     page.wait_for_timeout(800)
-    print("[안내] 「선택 발송인 등록」 메뉴를 클릭했습니다.")
 
 
 def _click_first_sender_select_in_popup(page: Page) -> None:
@@ -64,10 +62,8 @@ def _click_first_sender_select_in_popup(page: Page) -> None:
             "발송인 선택 팝업의 「선택」 버튼을 찾지 못했습니다. "
             "팝업·모달 로딩을 확인해 주세요."
         )
-    print(f"[디버그] 발송인 팝업 선택 버튼: {sel}")
     btn.click()
     page.wait_for_timeout(800)
-    print("[안내] 발송인 팝업에서 첫 번째 「선택」 버튼을 클릭했습니다.")
 
 
 def register_sender_for_selected_orders(
@@ -77,14 +73,11 @@ def register_sender_for_selected_orders(
     전체 선택 → 선택 발송인 등록 → 팝업 첫 「선택」 → OK
     → 저장 검색조건 재검색 → 전체 선택까지 수행합니다.
     """
-    print("[안내] 선택 발송인 등록 자동화를 시작합니다.")
 
     click_select_all_orders(page)
     _click_sender_dropdown_menu(page)
     _click_first_sender_select_in_popup(page)
     dismiss_popup_ok(page)
 
-    print("[안내] 저장된 검색 조건으로 목록을 다시 조회합니다.")
     run_saved_search_on_page(page, filter_data)
 
-    print("[안내] 선택 발송인 등록 및 재검색·전체 선택을 완료했습니다.")
