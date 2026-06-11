@@ -375,21 +375,82 @@ def select_shipper_on_page(
         wait_after_shipper_change(page, page_ready_selectors=page_ready_selectors)
 
 
-def run_change_session_shipper(config: Dict) -> str:
-    """브라우저를 띄워 주문목록에서 화주를 직접 바꾼 뒤 세션을 저장합니다.
+def read_session_shipper_label_on_page(page, config: Dict) -> str:
+    """이미 열린 브라우저 탭에서 주문목록 화주명을 읽습니다."""
+    order_list_url = (config.get("order_list_url") or "").strip()
+    if not order_list_url:
+        return ""
+
+    page.goto(order_list_url, wait_until="domcontentloaded")
+    page.wait_for_timeout(500)
+    if not _wait_for_shipper_dropdown(page):
+        return ""
+    return read_current_shipper_label(page)
+
+
+def change_session_shipper_on_page(page, config: Dict) -> str:
+    """이미 열린 브라우저에서 화주를 직접 바꾼 뒤 JSON에 저장합니다.
 
     터미널 Enter는 변경 완료 확인용입니다.
     반환: 변경 후 화주명 (미선택이면 빈 문자열)
     """
-    from playwright.sync_api import sync_playwright
-
-    from Mate2QA_login import create_context, ensure_login_only, load_env_credentials
     from Mate2QA_order_search import load_search_filter, save_search_filter
-    from Mate2QA_site_config import STATE_FILE_DOMESTIC
 
     order_list_url = (config.get("order_list_url") or "").strip()
     if not order_list_url:
         raise ValueError("order_list_url이 설정되지 않았습니다.")
+
+    page.goto(order_list_url, wait_until="domcontentloaded")
+    page.wait_for_timeout(800)
+
+    if not _wait_for_shipper_dropdown(page):
+        raise ValueError(
+            "화주 드롭다운을 찾지 못했습니다. 주문목록 화면을 확인해 주세요."
+        )
+
+    before_label = read_current_shipper_label(page)
+    if before_label:
+        print(f"[안내] 현재 세션 화주: {before_label}", flush=True)
+    else:
+        print("[안내] 현재 화주가 선택되지 않았습니다.", flush=True)
+
+    print(
+        "브라우저 상단의 화주 드롭다운에서 원하는 화주를 선택해 주세요.",
+        flush=True,
+    )
+    print("변경이 끝나면 이 터미널에서 Enter를 눌러 주세요.", flush=True)
+    try:
+        input()
+    except EOFError:
+        pass
+
+    wait_after_shipper_change(
+        page, page_ready_selectors=PAGE_READY_OM_ORDER_LIST
+    )
+    after_label = read_current_shipper_label(page)
+
+    if after_label and after_label != before_label:
+        print(
+            f"[완료] 화주가 '{before_label or '선택하세요'}' → '{after_label}'(으)로 변경되었습니다.",
+            flush=True,
+        )
+    elif after_label:
+        print(f"[완료] 화주 '{after_label}'(으)로 세션을 저장했습니다.", flush=True)
+    else:
+        print("[경고] 화주가 아직 '선택하세요' 상태입니다.", flush=True)
+
+    filter_data = load_search_filter() or {}
+    filter_data["shipper_label"] = after_label
+    save_search_filter(filter_data)
+    return after_label
+
+
+def run_change_session_shipper(config: Dict) -> str:
+    """브라우저를 띄워 주문목록에서 화주를 직접 바꾼 뒤 세션을 저장합니다 (단독 실행용)."""
+    from playwright.sync_api import sync_playwright
+
+    from Mate2QA_login import create_context, ensure_login_only, load_env_credentials
+    from Mate2QA_site_config import STATE_FILE_DOMESTIC
 
     ui_config = {
         **config,
@@ -411,49 +472,7 @@ def run_change_session_shipper(config: Dict) -> str:
                 creds,
                 state_file=STATE_FILE_DOMESTIC,
             )
-            page.goto(order_list_url, wait_until="domcontentloaded")
-            page.wait_for_timeout(800)
-
-            if not _wait_for_shipper_dropdown(page):
-                raise ValueError(
-                    "화주 드롭다운을 찾지 못했습니다. 주문목록 화면을 확인해 주세요."
-                )
-
-            before_label = read_current_shipper_label(page)
-            if before_label:
-                print(f"[안내] 현재 세션 화주: {before_label}", flush=True)
-            else:
-                print("[안내] 현재 화주가 선택되지 않았습니다.", flush=True)
-
-            print(
-                "브라우저 상단의 화주 드롭다운에서 원하는 화주를 선택해 주세요.",
-                flush=True,
-            )
-            print("변경이 끝나면 이 터미널에서 Enter를 눌러 주세요.", flush=True)
-            try:
-                input()
-            except EOFError:
-                pass
-
-            wait_after_shipper_change(
-                page, page_ready_selectors=PAGE_READY_OM_ORDER_LIST
-            )
-            after_label = read_current_shipper_label(page)
-
-            if after_label and after_label != before_label:
-                print(
-                    f"[완료] 화주가 '{before_label or '선택하세요'}' → '{after_label}'(으)로 변경되었습니다.",
-                    flush=True,
-                )
-            elif after_label:
-                print(f"[완료] 화주 '{after_label}'(으)로 세션을 저장했습니다.", flush=True)
-            else:
-                print("[경고] 화주가 아직 '선택하세요' 상태입니다.", flush=True)
-
-            filter_data = load_search_filter() or {}
-            filter_data["shipper_label"] = after_label
-            save_search_filter(filter_data)
-
+            after_label = change_session_shipper_on_page(page, ui_config)
             context.storage_state(path=str(STATE_FILE_DOMESTIC))
             return after_label
         finally:
@@ -465,11 +484,14 @@ def run_change_session_shipper(config: Dict) -> str:
             browser.close()
 
 
-def probe_session_shipper_label(config: Dict) -> str:
-    """저장 세션으로 주문목록에 접속해 현재 연결된 화주명을 읽습니다 (런처 표시용).
+def probe_session_shipper_label(config: Dict, *, page=None) -> str:
+    """주문목록에 접속해 현재 연결된 화주명을 읽습니다 (런처 표시용).
 
-    headless·slow_mo=0으로 최소 비용만 사용합니다.
+    page가 주어지면 기존 브라우저 탭을 사용하고, 없으면 headless로 별도 창을 엽니다.
     """
+    if page is not None:
+        return read_session_shipper_label_on_page(page, config)
+
     from playwright.sync_api import sync_playwright
 
     from Mate2QA_login import create_context, ensure_login_only, load_env_credentials
@@ -491,20 +513,16 @@ def probe_session_shipper_label(config: Dict) -> str:
         browser, context = create_context(
             p, probe_config, state_file=STATE_FILE_DOMESTIC
         )
-        page = context.new_page()
+        probe_page = context.new_page()
         try:
             ensure_login_only(
-                page,
+                probe_page,
                 context,
                 probe_config,
                 creds,
                 state_file=STATE_FILE_DOMESTIC,
             )
-            page.goto(order_list_url, wait_until="domcontentloaded")
-            page.wait_for_timeout(500)
-            if not _wait_for_shipper_dropdown(page):
-                return ""
-            return read_current_shipper_label(page)
+            return read_session_shipper_label_on_page(probe_page, probe_config)
         finally:
             try:
                 context.storage_state(path=str(STATE_FILE_DOMESTIC))

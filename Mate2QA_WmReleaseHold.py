@@ -179,42 +179,35 @@ def run_hold_release_after_search(page) -> None:
     fill_hold_release_reason(page)
 
 
+def run_task(page, context, config, *, keep_browser: bool = False):
+    """출고예정 검색 → 전체 선택 → 출고보류 해제 사유 입력."""
+    from Mate2QA_browser_session import wait_enter_after_task
+
+    goto_out_expect_list(page, config)
+    fill_search_column_and_text(
+        page,
+        column_value=SEARCH_COLUMN_MALL_OD_NO,
+        search_text=DEFAULT_SEARCH_TEXT,
+    )
+    select_out_state_hold(page)
+    click_search_button(page)
+    run_hold_release_after_search(page)
+
+    wait_enter_after_task(
+        keep_browser=keep_browser,
+        message=(
+            "저장 후 Enter를 누르시면 메뉴로 돌아갑니다. (브라우저는 유지됩니다)"
+            if keep_browser
+            else "저장 후 Enter를 누르시면 팝업창이 닫힙니다."
+        ),
+    )
+
+
 def run():
-    """로그인 → 출고예정 검색 → 전체 선택 → 출고보류 해제 사유 입력."""
-    print_site_url_banner()
-    config = refresh_config_from_env(CONFIG)
-    creds = load_env_credentials(config["login_url"])
+    """로그인 → 출고보류 해제 (단독 실행)."""
+    from Mate2QA_browser_session import run_with_browser
 
-    with sync_playwright() as p:
-        browser, context = create_context(p, config, state_file=STATE_FILE)
-        page = context.new_page()
-
-        try:
-            config = ensure_login_only(
-                page, context, config, creds, state_file=STATE_FILE
-            )
-            goto_out_expect_list(page, config)
-            fill_search_column_and_text(
-                page,
-                column_value=SEARCH_COLUMN_MALL_OD_NO,
-                search_text=DEFAULT_SEARCH_TEXT,
-            )
-            select_out_state_hold(page)
-            click_search_button(page)
-            run_hold_release_after_search(page)
-
-            try:
-                input(
-                    "저장 후 Enter를 누르시면 팝업창이 닫힙니다."
-                )
-            except EOFError:
-                pass
-        except PlaywrightTimeoutError:
-            raise
-        finally:
-            context.storage_state(path=str(STATE_FILE))
-            context.close()
-            browser.close()
+    run_with_browser(run_task, config=CONFIG, state_file=STATE_FILE)
 
 
 if __name__ == "__main__":

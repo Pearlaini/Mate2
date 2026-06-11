@@ -733,45 +733,36 @@ def fill_domestic_order_detail_fields(
     try_select_domestic_dlvr_company(page)
 
 
-def run():
-    """로그인 후 국내 수기 주문 등록 자동화를 수행합니다."""
-    print_site_url_banner()
-    config = refresh_config_from_env(CONFIG)
-    creds = load_env_credentials(config["login_url"])
+def run_task(page, context, config, *, keep_browser: bool = False):
+    """국내 수기 주문 등록 자동화를 수행합니다."""
     product_cd = resolve_sample_product_cd(config)
     now = datetime.now()
     stamp_yymmddhhmm = now.strftime("%y%m%d%H%M")
     stamp_yymmddhh = now.strftime("%y%m%d%H")
     stamp_mmddhhmm = now.strftime("%m%d%H%M")
 
-    with sync_playwright() as p:
-        browser, context = create_context(p, config, state_file=STATE_FILE)
-        page = context.new_page()
+    open_domestic_order_register_page(page, config)
+    select_domestic_sach_cd(page, config["sach_cd_value"])
+    search_and_select_product_in_popup(page, product_cd)
+    fill_domestic_order_detail_fields(
+        page,
+        config,
+        stamp_mmddhhmm,
+        stamp_yymmddhhmm,
+        stamp_yymmddhh,
+    )
+    # 저장 후 SweetAlert/알림은 자동으로 누르지 않음 (수동 확인)
+    click_save_button(page, confirm_swal=False)
+    from Mate2QA_browser_session import wait_enter_after_task
 
-        try:
-            config = ensure_login_only(page, context, config, creds, state_file=STATE_FILE)
-            open_domestic_order_register_page(page, config)
-            select_domestic_sach_cd(page, config["sach_cd_value"])
-            search_and_select_product_in_popup(page, product_cd)
-            fill_domestic_order_detail_fields(
-                page,
-                config,
-                stamp_mmddhhmm,
-                stamp_yymmddhhmm,
-                stamp_yymmddhh,
-            )
-            # 저장 후 SweetAlert/알림은 자동으로 누르지 않음 (수동 확인)
-            click_save_button(page, confirm_swal=False)
-            try:
-                input("Enter를 누르시면 팝업창이 닫힙니다.")
-            except EOFError:
-                pass
-        except PlaywrightTimeoutError:
-            raise
-        finally:
-            context.storage_state(path=str(STATE_FILE))
-            context.close()
-            browser.close()
+    wait_enter_after_task(keep_browser=keep_browser)
+
+
+def run():
+    """로그인 후 국내 수기 주문 등록 자동화를 수행합니다 (단독 실행)."""
+    from Mate2QA_browser_session import run_with_browser
+
+    run_with_browser(run_task, config=CONFIG, state_file=STATE_FILE)
 
 
 if __name__ == "__main__":

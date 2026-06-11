@@ -856,45 +856,31 @@ def click_save_button(page, *, confirm_swal: bool = False):
             )
 
 
+def run_task(page, context, config, *, keep_browser: bool = False):
+    """OMS 입고예정 등록(엑셀 업로드·저장)까지 수행합니다."""
+    from Mate2QA_browser_session import wait_enter_after_task
+
+    goto_om_put_expect_list(page, config)
+    click_inbound_register_button(page)
+    select_depot_cd(page, config.get("depot_label", "구로센터"))
+    select_vendor_cd(page)
+    fill_put_request_info_fields(page)
+
+    item_method = ask_inbound_item_method()
+    if item_method == "1":
+        run_item_add_flow(page, config)
+    else:
+        run_excel_upload_flow(page, config)
+
+    click_save_button(page)
+    wait_enter_after_task(keep_browser=keep_browser)
+
+
 def run():
-    """로그인 후 OMS 입고예정 등록(엑셀 업로드·저장)까지 수행합니다."""
-    print_site_url_banner()
-    creds = load_env_credentials()
+    """로그인 후 OMS 입고예정 등록까지 수행합니다 (단독 실행)."""
+    from Mate2QA_browser_session import run_with_browser
 
-    with sync_playwright() as p:
-        browser, context = create_context(p, CONFIG, state_file=STATE_FILE)
-        page = context.new_page()
-
-        try:
-            ensure_login_only(page, context, CONFIG, creds, state_file=STATE_FILE)
-            goto_om_put_expect_list(page, CONFIG)
-            click_inbound_register_button(page)
-            select_depot_cd(page, CONFIG.get("depot_label", "구로센터"))
-            select_vendor_cd(page)
-            fill_put_request_info_fields(page)
-
-            item_method = ask_inbound_item_method()
-            if item_method == "1":
-                run_item_add_flow(page, CONFIG)
-            else:
-                run_excel_upload_flow(page, CONFIG)
-
-            click_save_button(page)
-            done_msg = (
-                "입고상품추가·저장"
-                if item_method == "1"
-                else "엑셀 업로드·저장"
-            )
-            try:
-                input("Enter를 누르시면 팝업창이 닫힙니다.")
-            except EOFError:
-                pass
-        except PlaywrightTimeoutError:
-            raise
-        finally:
-            context.storage_state(path=str(STATE_FILE))
-            context.close()
-            browser.close()
+    run_with_browser(run_task, config=CONFIG, state_file=STATE_FILE)
 
 
 if __name__ == "__main__":

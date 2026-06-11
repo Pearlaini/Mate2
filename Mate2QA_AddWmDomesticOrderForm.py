@@ -592,35 +592,30 @@ def search_outbound_item_popup(page, keyword: str) -> None:
     page.wait_for_timeout(1000)
 
 
-def run() -> None:
-    """로그인 → 출고예정 화주 선택 → 수기등록 폼 입력 → 출고대상 품목 팝업 검색까지만 수행."""
-    print_site_url_banner()
-    creds = load_env_credentials()
+def run_task(page, context, config, *, keep_browser: bool = False) -> None:
+    """출고예정 수기등록 폼 입력 → 출고대상 품목 팝업 검색까지만 수행."""
     now = datetime.now()
+    goto_out_expect_list(page, config)
+    click_out_expect_manual_register(page)
+    fill_wm_manual_register_form(page, config, now)
+    click_add_outbound_item_button(page)
+    search_outbound_item_popup(
+        page, config.get("target_product_search_keyword", "크래커")
+    )
+    from Mate2QA_browser_session import MSG_CLOSE_BROWSER, MSG_KEEP_BROWSER
 
-    with sync_playwright() as p:
-        browser, context = create_context(p, CONFIG, state_file=STATE_FILE)
-        page = context.new_page()
+    try:
+        input(MSG_KEEP_BROWSER if keep_browser else MSG_CLOSE_BROWSER)
+    except EOFError:
+        if not keep_browser:
+            page.wait_for_timeout(600_000)
 
-        try:
-            ensure_login_only(page, context, CONFIG, creds, state_file=STATE_FILE)
-            goto_out_expect_list(page, CONFIG)
-            click_out_expect_manual_register(page)
-            fill_wm_manual_register_form(page, CONFIG, now)
-            click_add_outbound_item_button(page)
-            search_outbound_item_popup(
-                page, CONFIG.get("target_product_search_keyword", "크래커")
-            )
-            try:
-                input("Enter를 누르시면 팝업창이 닫힙니다.")
-            except EOFError:
-                page.wait_for_timeout(600_000)
-        except PlaywrightTimeoutError:
-            raise
-        finally:
-            context.storage_state(path=str(STATE_FILE))
-            context.close()
-            browser.close()
+
+def run() -> None:
+    """로그인 → 출고예정 수기등록까지 수행 (단독 실행)."""
+    from Mate2QA_browser_session import run_with_browser
+
+    run_with_browser(run_task, config=CONFIG, state_file=STATE_FILE)
 
 
 if __name__ == "__main__":

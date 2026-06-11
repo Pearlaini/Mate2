@@ -141,36 +141,24 @@ def run_stock_search(stock_page, keyword: str) -> None:
     stock_page.wait_for_timeout(1000)
 
 
+def run_task(page, context, config, *, keep_browser: bool = False):
+    """재고/재고이동내역 탭을 열고 같은 검색어로 조회합니다."""
+    from Mate2QA_browser_session import wait_enter_after_task
+
+    stock_page = open_stock_list_in_new_tab(context, config)
+    keyword = ask_stock_search_keyword()
+    run_stock_search(stock_page, keyword)
+    transfer_page = open_transfer_list_in_new_tab(context, config)
+    run_stock_search(transfer_page, keyword)
+
+    wait_enter_after_task(keep_browser=keep_browser)
+
+
 def run():
-    """로그인 후 재고/재고이동내역 탭을 열고 같은 검색어로 조회합니다."""
-    print_site_url_banner()
-    config = refresh_config_from_env(CONFIG)
-    creds = load_env_credentials(config["login_url"])
+    """로그인 후 재고 조회 (단독 실행)."""
+    from Mate2QA_browser_session import run_with_browser
 
-    with sync_playwright() as p:
-        browser, context = create_context(p, config, state_file=STATE_FILE)
-        page = context.new_page()
-
-        try:
-            config = ensure_login_only(
-                page, context, config, creds, state_file=STATE_FILE
-            )
-            stock_page = open_stock_list_in_new_tab(context, config)
-            keyword = ask_stock_search_keyword()
-            run_stock_search(stock_page, keyword)
-            transfer_page = open_transfer_list_in_new_tab(context, config)
-            run_stock_search(transfer_page, keyword)
-
-            try:
-                input("Enter를 누르시면 팝업창이 닫힙니다.")
-            except EOFError:
-                pass
-        except PlaywrightTimeoutError:
-            raise
-        finally:
-            context.storage_state(path=str(STATE_FILE))
-            context.close()
-            browser.close()
+    run_with_browser(run_task, config=CONFIG, state_file=STATE_FILE)
 
 
 if __name__ == "__main__":

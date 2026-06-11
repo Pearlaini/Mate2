@@ -647,50 +647,40 @@ def search_order_by_mall_od_no(page: Page, search_text: str) -> None:
     click_search_button(page)
 
 
+def run_task(page, context, config, *, keep_browser: bool = False) -> None:
+    """출고작업 검색 → 박스추천 → 포장지시 탭 이동."""
+    from Mate2QA_browser_session import wait_enter_after_task
+
+    goto_out_wk_ord_list(page, config)
+
+    out_tseq_sno = input_out_tseq_sno()
+    search_and_select_out_tseq(page, out_tseq_sno)
+    click_out_wk_ord_instruction_tab(page)
+    with abort_popup_on_messages(OUT_WK_ORD_PROCESSING_ERROR):
+        run_box_recommend_and_move_next(page)
+        click_alert_ok_before_picking_tab(page)
+        click_picking_instruction_tab(page)
+        click_picking_next_step_to_packing(page)
+        click_packing_instruction_tab(page)
+        click_packing_next_step_all(page)
+    click_out_confirm_tab(page)
+    stock_page = open_sach_stock_tab(context, config)
+    select_stock_search_column_product_code(stock_page)
+    manage_page = open_order_manage_tab(context, config)
+    search_order_by_mall_od_no(manage_page, "J")
+    page.bring_to_front()
+    page.wait_for_timeout(500)
+    click_out_confirm_tab(page)
+    click_confirm_product_picking_list(page)
+
+    wait_enter_after_task(keep_browser=keep_browser)
+
+
 def run() -> None:
-    """로그인 확인 → 출고작업 검색 → 박스추천 → 포장지시 탭 이동."""
-    print_site_url_banner()
-    config = refresh_config_from_env(CONFIG)
-    creds = load_env_credentials(config["login_url"])
+    """로그인 → 출고지시~출고확정 (단독 실행)."""
+    from Mate2QA_browser_session import run_with_browser
 
-    with sync_playwright() as p:
-        browser, context = create_context(p, config, state_file=STATE_FILE)
-        page = context.new_page()
-
-        try:
-            config = ensure_login_only(page, context, config, creds, state_file=STATE_FILE)
-            goto_out_wk_ord_list(page, config)
-
-            out_tseq_sno = input_out_tseq_sno()
-            search_and_select_out_tseq(page, out_tseq_sno)
-            click_out_wk_ord_instruction_tab(page)
-            with abort_popup_on_messages(OUT_WK_ORD_PROCESSING_ERROR):
-                run_box_recommend_and_move_next(page)
-                click_alert_ok_before_picking_tab(page)
-                click_picking_instruction_tab(page)
-                click_picking_next_step_to_packing(page)
-                click_packing_instruction_tab(page)
-                click_packing_next_step_all(page)
-            click_out_confirm_tab(page)
-            stock_page = open_sach_stock_tab(context, config)
-            select_stock_search_column_product_code(stock_page)
-            manage_page = open_order_manage_tab(context, config)
-            search_order_by_mall_od_no(manage_page, "J")
-            page.bring_to_front()
-            page.wait_for_timeout(500)
-            click_out_confirm_tab(page)
-            click_confirm_product_picking_list(page)
-
-            try:
-                input("Enter를 누르시면 팝업창이 닫힙니다.")
-            except EOFError:
-                pass
-        except PlaywrightTimeoutError:
-            raise
-        finally:
-            context.storage_state(path=str(STATE_FILE))
-            context.close()
-            browser.close()
+    run_with_browser(run_task, config=CONFIG, state_file=STATE_FILE)
 
 
 if __name__ == "__main__":

@@ -104,81 +104,70 @@ def select_depot_cd_if_needed(page) -> None:
 
 
 
+def run_task(page, context, config, *, keep_browser: bool = False):
+    """출고예정~할당 → 출고작업 전체박스 추천 실행까지."""
+    from Mate2QA_browser_session import wait_enter_after_task
+
+    goto_out_expect_list(page, config)
+
+    try:
+        input("준비되면 Enter...")
+    except EOFError:
+        pass
+
+    filter_data = capture_wm_wave_filter_from_page(page)
+    if not filter_data.get("selected_od_snos"):
+        raise ValueError(
+            "선택된 주문(od_sno)이 없습니다. "
+            "출고예정 목록에서 주문을 체크한 뒤 Enter를 눌러 주세요."
+        )
+
+    run_wave_process_on_expect_list(page, filter_data)
+
+    if "outWaveList.do" not in page.url:
+        goto_out_wave_list(page, config)
+
+    apply_wm_wave_search(page, filter_data, select_orders=True)
+    filter_data = capture_wave_selected_row_context(page, filter_data)
+
+    if is_dlvr_div_empty(filter_data):
+        pass
+    else:
+        click_address_refine(page)
+
+    click_out_alloc_assign(page, config["out_alloc_rgst_url"])
+    select_depot_cd_if_needed(page)
+    fill_out_alloc_rgst_form(page, filter_data)
+    select_all_alloc_rgst_targets(page)
+    click_out_alloc_rgst_button(page)
+    wait_for_out_wk_ord_after_alloc(page, config)
+
+    out_tseq_nm = load_out_tseq_nm()
+    if not out_tseq_nm:
+        raise ValueError(
+            "출고차수명(out_tseq_nm)이 JSON에 없습니다. "
+            "출고차수할당 단계(fill_out_alloc_rgst_form)를 확인해 주세요."
+        )
+
+    search_out_wk_ord_by_tseq_nm(page, out_tseq_nm)
+    select_out_wk_ord_row_by_tseq_nm(page, out_tseq_nm)
+    click_out_wk_ord_instruction_tab(page)
+    click_box_recommend_dropdown(page)
+    click_total_box_recommend_btn(page)
+
+    wait_enter_after_task(keep_browser=keep_browser)
+
+
 def run():
-    """로그인 → 출고예정~할당 → 출고작업 전체박스 추천 실행까지."""
-    print_site_url_banner()
-    config = refresh_config_from_env(CONFIG)
-    creds = load_env_credentials(config["login_url"])
+    """로그인 → 출고등록~출고지시 (단독 실행)."""
+    from Mate2QA_browser_session import run_with_browser
 
-    with sync_playwright() as p:
-        browser, context = create_context(p, config, state_file=STATE_FILE)
-        page = context.new_page()
-
-        try:
-            config = ensure_login_only(page, context, config, creds, state_file=STATE_FILE)
-            goto_out_expect_list(page, config)
-
-            try:
-                input("준비되면 Enter...")
-            except EOFError:
-
-
-                pass
-
-            filter_data = capture_wm_wave_filter_from_page(page)
-            if not filter_data.get("selected_od_snos"):
-                raise ValueError(
-                    "선택된 주문(od_sno)이 없습니다. "
-                    "출고예정 목록에서 주문을 체크한 뒤 Enter를 눌러 주세요."
-                )
-
-            run_wave_process_on_expect_list(page, filter_data)
-
-            if "outWaveList.do" not in page.url:
-                goto_out_wave_list(page, config)
-
-            apply_wm_wave_search(page, filter_data, select_orders=True)
-            filter_data = capture_wave_selected_row_context(page, filter_data)
-
-            if is_dlvr_div_empty(filter_data):
-                pass
-            else:
-                click_address_refine(page)
-
-            click_out_alloc_assign(page, config["out_alloc_rgst_url"])
-            select_depot_cd_if_needed(page)
-            fill_out_alloc_rgst_form(page, filter_data)
-            select_all_alloc_rgst_targets(page)
-            click_out_alloc_rgst_button(page)
-            wait_for_out_wk_ord_after_alloc(page, config)
-
-            out_tseq_nm = load_out_tseq_nm()
-            if not out_tseq_nm:
-                raise ValueError(
-                    "출고차수명(out_tseq_nm)이 JSON에 없습니다. "
-                    "출고차수할당 단계(fill_out_alloc_rgst_form)를 확인해 주세요."
-                )
-
-            search_out_wk_ord_by_tseq_nm(page, out_tseq_nm)
-            select_out_wk_ord_row_by_tseq_nm(page, out_tseq_nm)
-            click_out_wk_ord_instruction_tab(page)
-            click_box_recommend_dropdown(page)
-            click_total_box_recommend_btn(page)
-
-            try:
-                input(
-                    "Enter를 누르시면 팝업창이 닫힙니다."
-                )
-            except EOFError:
-                pass
-        except PlaywrightTimeoutError as exc:
-            if "grid-table-tab3" in str(exc):
-                pass
-            raise
-        finally:
-            context.storage_state(path=str(STATE_FILE))
-            context.close()
-            browser.close()
+    try:
+        run_with_browser(run_task, config=CONFIG, state_file=STATE_FILE)
+    except PlaywrightTimeoutError as exc:
+        if "grid-table-tab3" in str(exc):
+            return
+        raise
 
 
 if __name__ == "__main__":

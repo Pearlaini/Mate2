@@ -138,64 +138,55 @@ def run_out_wk_ord_to_final(page, context, config, filter_data: Dict) -> None:
     click_confirm_product_picking_list(page)
 
 
+def run_task(page, context, config, *, keep_browser: bool = False) -> None:
+    """웨이브~할당 → 출고작업 출고확정까지."""
+    from Mate2QA_browser_session import wait_enter_after_task
+
+    goto_out_wave_list(page, config)
+
+    try:
+        input("준비되면 Enter...")
+    except EOFError:
+        pass
+
+    filter_data = load_wm_wave_filter()
+    if not filter_data:
+        raise ValueError(
+            "search_filter_wm_wave.json이 없습니다. "
+            "웨이브 목록에서 검색·주문 선택 후 진행하거나 "
+            "23번(출고등록~출고할당)을 먼저 실행해 주세요."
+        )
+
+    apply_wm_wave_search(page, filter_data, select_orders=True)
+    filter_data = capture_wave_selected_row_context(page, filter_data)
+
+    if is_dlvr_div_empty(filter_data):
+        pass
+    else:
+        click_address_refine(page)
+
+    click_out_alloc_assign(page, config["out_alloc_rgst_url"])
+    select_depot_cd_if_needed(page)
+    fill_out_alloc_rgst_form(page, filter_data)
+    select_all_alloc_rgst_targets(page)
+    click_out_alloc_rgst_button(page)
+    wait_for_out_wk_ord_after_alloc(page, config)
+
+    run_out_wk_ord_to_final(page, context, config, filter_data)
+
+    wait_enter_after_task(keep_browser=keep_browser)
+
+
 def run() -> None:
-    """로그인 → 웨이브~할당 → 출고작업 출고확정까지."""
-    print_site_url_banner()
-    config = refresh_config_from_env(CONFIG)
-    creds = load_env_credentials(config["login_url"])
+    """로그인 → Wave~출고확정 (단독 실행)."""
+    from Mate2QA_browser_session import run_with_browser
 
-    with sync_playwright() as p:
-        browser, context = create_context(p, config, state_file=STATE_FILE)
-        page = context.new_page()
-
-        try:
-            config = ensure_login_only(page, context, config, creds, state_file=STATE_FILE)
-            goto_out_wave_list(page, config)
-
-            try:
-                input("준비되면 Enter...")
-            except EOFError:
-
-
-                pass
-
-            filter_data = load_wm_wave_filter()
-            if not filter_data:
-                raise ValueError(
-                    "search_filter_wm_wave.json이 없습니다. "
-                    "웨이브 목록에서 검색·주문 선택 후 진행하거나 "
-                    "23번(출고등록~출고할당)을 먼저 실행해 주세요."
-                )
-
-            apply_wm_wave_search(page, filter_data, select_orders=True)
-            filter_data = capture_wave_selected_row_context(page, filter_data)
-
-            if is_dlvr_div_empty(filter_data):
-                pass
-            else:
-                click_address_refine(page)
-
-            click_out_alloc_assign(page, config["out_alloc_rgst_url"])
-            select_depot_cd_if_needed(page)
-            fill_out_alloc_rgst_form(page, filter_data)
-            select_all_alloc_rgst_targets(page)
-            click_out_alloc_rgst_button(page)
-            wait_for_out_wk_ord_after_alloc(page, config)
-
-            run_out_wk_ord_to_final(page, context, config, filter_data)
-
-            try:
-                input("Enter를 누르시면 팝업창이 닫힙니다.")
-            except EOFError:
-                pass
-        except PlaywrightTimeoutError as exc:
-            if "grid-table-tab3" in str(exc):
-                pass
-            raise
-        finally:
-            context.storage_state(path=str(STATE_FILE))
-            context.close()
-            browser.close()
+    try:
+        run_with_browser(run_task, config=CONFIG, state_file=STATE_FILE)
+    except PlaywrightTimeoutError as exc:
+        if "grid-table-tab3" in str(exc):
+            return
+        raise
 
 
 if __name__ == "__main__":
