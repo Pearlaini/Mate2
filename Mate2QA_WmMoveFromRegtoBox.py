@@ -16,8 +16,16 @@ from Mate2QA_login import (
     ensure_login_only,
     load_env_credentials,
 )
-from Mate2QA_site_config import CONFIG, STATE_FILE_DOMESTIC, print_site_url_banner, refresh_config_from_env
+from Mate2QA_shipper_select import PAGE_READY_WM_OUT_EXPECT, select_shipper_on_page
+from Mate2QA_site_config import (
+    CONFIG as _SITE_CONFIG,
+    STATE_FILE_DOMESTIC,
+    print_site_url_banner,
+    refresh_config_from_env,
+)
 from Mate2QA_wm_wave_search import (
+    OutAllocRgstSearchEmptyError,
+    print_out_alloc_rgst_no_results,
     apply_wm_wave_search,
     capture_wave_selected_row_context,
     capture_wm_wave_filter_from_page,
@@ -36,13 +44,24 @@ from Mate2QA_wm_wave_search import (
     select_out_wk_ord_row_by_tseq_nm,
 )
 
+CONFIG = {
+    **_SITE_CONFIG,
+    "shipper_label": "",
+    "shipper_label_ably_default": "아이니",
+    "shipper_label_default": "",
+}
+
 STATE_FILE = STATE_FILE_DOMESTIC
 
 
 def goto_out_expect_list(page, config: Dict):
-    """WMS 출고예정 목록 화면으로 이동합니다."""
+    """WMS 출고예정 목록으로 이동한 뒤 화주·검색 폼이 준비될 때까지 대기합니다."""
     page.goto(config["out_expect_list_url"], wait_until="domcontentloaded")
     page.wait_for_timeout(1000)
+    select_shipper_on_page(
+        page, config, page_ready_selectors=PAGE_READY_WM_OUT_EXPECT
+    )
+    page.locator("#searchForm").first.wait_for(state="visible", timeout=15_000)
 
 
 def goto_out_wave_list(page, config: Dict):
@@ -111,7 +130,7 @@ def run_task(page, context, config, *, keep_browser: bool = False):
     goto_out_expect_list(page, config)
 
     try:
-        input("준비되면 Enter...")
+        input("이동할 주문서를 선택 후 Enter...")
     except EOFError:
         pass
 
@@ -138,7 +157,17 @@ def run_task(page, context, config, *, keep_browser: bool = False):
     click_out_alloc_assign(page, config["out_alloc_rgst_url"])
     select_depot_cd_if_needed(page)
     fill_out_alloc_rgst_form(page, filter_data)
-    select_all_alloc_rgst_targets(page)
+    try:
+        select_all_alloc_rgst_targets(page)
+    except OutAllocRgstSearchEmptyError:
+        print_out_alloc_rgst_no_results()
+        return
+    except PlaywrightTimeoutError as exc:
+        if "outallocrgst.do" not in (page.url or "").lower():
+            raise
+        print_out_alloc_rgst_no_results()
+        return
+
     click_out_alloc_rgst_button(page)
     wait_for_out_wk_ord_after_alloc(page, config)
 
@@ -151,9 +180,18 @@ def run_task(page, context, config, *, keep_browser: bool = False):
 
     search_out_wk_ord_by_tseq_nm(page, out_tseq_nm)
     select_out_wk_ord_row_by_tseq_nm(page, out_tseq_nm)
-    click_out_wk_ord_instruction_tab(page)
-    click_box_recommend_dropdown(page)
-    click_total_box_recommend_btn(page)
+    try:
+        click_out_wk_ord_instruction_tab(page)
+        click_box_recommend_dropdown(page)
+        click_total_box_recommend_btn(page)
+    except PlaywrightTimeoutError as exc:
+        if "grid-table-tab3" not in str(exc):
+            raise
+        print(
+            "[경고] 출고지시 그리드(#grid-table-tab3) 로딩이 지연되어 "
+            "박스추천 단계는 건너뜁니다. 화면에서 직접 확인해 주세요.",
+            flush=True,
+        )
 
     wait_enter_after_task(keep_browser=keep_browser)
 
@@ -164,6 +202,8 @@ def run():
 
     try:
         run_with_browser(run_task, config=CONFIG, state_file=STATE_FILE)
+    except OutAllocRgstSearchEmptyError:
+        return
     except PlaywrightTimeoutError as exc:
         if "grid-table-tab3" in str(exc):
             return

@@ -11,7 +11,13 @@ from playwright.sync_api import (
     sync_playwright,
 )
 
-from Mate2QA_login import create_context, ensure_login_only, load_env_credentials
+from Mate2QA_login import (
+    apply_page_zoom,
+    create_context,
+    ensure_login_only,
+    load_env_credentials,
+    needs_login,
+)
 from Mate2QA_site_config import (
     CONFIG,
     STATE_FILE_DOMESTIC,
@@ -20,7 +26,9 @@ from Mate2QA_site_config import (
 )
 
 MSG_CLOSE_BROWSER = "Enter를 누르시면 팝업창이 닫힙니다."
-MSG_KEEP_BROWSER = "Enter를 누르시면 메뉴로 돌아갑니다. (브라우저는 유지됩니다)"
+MSG_KEEP_BROWSER = "Enter를 누르세요."
+MSG_KEEP_BROWSER_AFTER_SAVE = "저장 후 Enter를 누르세요."
+MSG_CLOSE_BROWSER_AFTER_SAVE = "저장 후 Enter를 누르시면 팝업창이 닫힙니다."
 
 
 def wait_enter_after_task(*, keep_browser: bool, message: Optional[str] = None) -> None:
@@ -98,24 +106,40 @@ class BrowserSession:
         if self.context:
             self.context.storage_state(path=str(self.state_file))
 
-    def ensure_logged_in(self) -> Dict:
-        """작업 전 로그인·세션 만료 여부를 다시 확인합니다."""
+    def ensure_logged_in(self, config: Optional[Dict] = None) -> Dict:
+        """작업 전 로그인·세션 만료 여부를 다시 확인합니다.
+
+        이미 업무 화면에 있으면 login_url로 이동하지 않습니다 (화면이 튕기는 현상 방지).
+        """
         if not self.page or not self.context or self.config is None:
             raise RuntimeError("브라우저 세션이 시작되지 않았습니다.")
-        creds = load_env_credentials(self.config["login_url"])
-        self.config = ensure_login_only(
-            self.page,
-            self.context,
-            self.config,
-            creds,
-            state_file=self.state_file,
-        )
-        return self.config
+
+        merged = refresh_config_from_env(config or self.config)
+        creds = load_env_credentials(merged["login_url"])
+
+        if needs_login(self.page, merged["login_url"]):
+            merged = ensure_login_only(
+                self.page,
+                self.context,
+                merged,
+                creds,
+                state_file=self.state_file,
+            )
+        else:
+            apply_page_zoom(self.page, merged)
+
+        self.config = merged
+        return merged
 
     def prepare_for_task(self) -> None:
         """메인 탭 외 추가 탭을 닫아 다음 작업을 준비합니다."""
-        if not self.context or not self.page:
+        if not self.context:
             return
+
+        if self.page is None or self.page.is_closed():
+            live_pages = [p for p in self.context.pages if not p.is_closed()]
+            self.page = live_pages[0] if live_pages else self.context.new_page()
+
         main = self.page
         for extra in list(self.context.pages):
             if extra is main or extra.is_closed():
@@ -125,7 +149,8 @@ class BrowserSession:
             except Exception:
                 pass
         try:
-            main.bring_to_front()
+            if not main.is_closed():
+                main.bring_to_front()
         except Exception:
             pass
 

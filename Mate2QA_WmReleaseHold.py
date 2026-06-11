@@ -181,7 +181,11 @@ def run_hold_release_after_search(page) -> None:
 
 def run_task(page, context, config, *, keep_browser: bool = False):
     """출고예정 검색 → 전체 선택 → 출고보류 해제 사유 입력."""
-    from Mate2QA_browser_session import wait_enter_after_task
+    from Mate2QA_browser_session import (
+        MSG_CLOSE_BROWSER_AFTER_SAVE,
+        MSG_KEEP_BROWSER_AFTER_SAVE,
+        wait_enter_after_task,
+    )
 
     goto_out_expect_list(page, config)
     fill_search_column_and_text(
@@ -196,9 +200,9 @@ def run_task(page, context, config, *, keep_browser: bool = False):
     wait_enter_after_task(
         keep_browser=keep_browser,
         message=(
-            "저장 후 Enter를 누르시면 메뉴로 돌아갑니다. (브라우저는 유지됩니다)"
+            MSG_KEEP_BROWSER_AFTER_SAVE
             if keep_browser
-            else "저장 후 Enter를 누르시면 팝업창이 닫힙니다."
+            else MSG_CLOSE_BROWSER_AFTER_SAVE
         ),
     )
 

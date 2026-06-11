@@ -3,9 +3,16 @@
 # 실행: python Mate2QA_menu_launcher.py
 
 import importlib
+import traceback
 from typing import Optional
 
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
 from Mate2QA_browser_session import BrowserSession
+from Mate2QA_wm_wave_search import (
+    OutAllocRgstSearchEmptyError,
+    print_out_alloc_rgst_no_results,
+)
 from Mate2QA_shipper_select import (
     change_session_shipper_on_page,
     probe_session_shipper_label,
@@ -48,7 +55,7 @@ def _fetch_session_shipper_label(session: Optional[BrowserSession]) -> str:
     config = _shipper_display_config()
     if session and session.page:
         try:
-            session.ensure_logged_in()
+            session.ensure_logged_in(config)
             label = (
                 probe_session_shipper_label(config, page=session.page) or ""
             ).strip()
@@ -79,7 +86,7 @@ def build_menu_text(session: Optional[BrowserSession] = None) -> str:
     """화주 배너가 포함된 메뉴 문자열을 반환합니다."""
     shipper_banner = format_shipper_banner(session)
     return (
-        "============================================================\n"
+        "\n============================================================\n"
         f"어떤 작업을 진행할지 번호를 입력해 주세요. {shipper_banner}\n"
         f"{_MENU_BODY}"
     )
@@ -109,6 +116,14 @@ def resolve_task_module(choice: str) -> str | None:
     return _COMMON_TASKS.get(choice)
 
 
+def _module_task_config(module) -> dict:
+    """작업 모듈 전용 CONFIG(sach_cd_value 등)를 env 기준으로 갱신합니다."""
+    module_config = getattr(module, "CONFIG", None)
+    if module_config is None:
+        raise AttributeError(f"{module.__name__}에 CONFIG가 없습니다.")
+    return refresh_config_from_env(module_config)
+
+
 def run_task_module(module_name: str, session: BrowserSession) -> None:
     """선택한 모듈의 run_task()를 공유 세션에서 실행합니다."""
     module = importlib.import_module(module_name)
@@ -117,19 +132,31 @@ def run_task_module(module_name: str, session: BrowserSession) -> None:
     if run_fn is None:
         raise AttributeError(f"{module_name}에 run_task() 함수가 없습니다.")
 
+    task_config = _module_task_config(module)
     session.prepare_for_task()
-    config = session.ensure_logged_in()
-    run_fn(session.page, session.context, config, keep_browser=True)
+    config = session.ensure_logged_in(task_config)
+    try:
+        run_fn(session.page, session.context, config, keep_browser=True)
+    except OutAllocRgstSearchEmptyError:
+        print_out_alloc_rgst_no_results()
+    except PlaywrightTimeoutError as exc:
+        page_url = (session.page.url if session.page else "").lower()
+        if "grid-table-tab3" in str(exc):
+            print(
+                "[경고] 출고지시 그리드(#grid-table-tab3) 대기 시간 초과 — "
+                "여기까지 진행된 상태로 메뉴로 돌아갑니다.",
+                flush=True,
+            )
+        elif "outallocrgst.do" in page_url:
+            print_out_alloc_rgst_no_results()
+        else:
+            raise
     session.prepare_for_task()
     session.save_state()
 
 
 def main() -> None:
     """메뉴에서 작업을 선택해 실행합니다. 9 또는 Ctrl+C 전까지 브라우저를 유지합니다."""
-    print(
-        "[안내] 브라우저를 시작합니다. 작업 후에도 창은 유지됩니다. (9=종료)",
-        flush=True,
-    )
     with BrowserSession() as session:
         while True:
             print(build_menu_text(session))
@@ -145,7 +172,7 @@ def main() -> None:
                 try:
                     global _cached_session_shipper
                     config = _shipper_display_config()
-                    session.ensure_logged_in()
+                    session.ensure_logged_in(config)
                     _cached_session_shipper = (
                         change_session_shipper_on_page(session.page, config) or ""
                     ).strip() or None
@@ -165,12 +192,13 @@ def main() -> None:
 
             try:
                 run_task_module(module_name, session)
-                print("[안내] 다음 작업 번호를 입력해 주세요. (9=종료)")
             except KeyboardInterrupt:
                 pass
             except Exception as exc:
                 print(f"[오류] {exc}")
-                print("[안내] 메뉴로 돌아갑니다. 다른 번호를 선택해 주세요.")
+                traceback.print_exc()
+                session.prepare_for_task()
+                print("[안내] 메뉴로 돌아갑니다. 브라우저는 유지됩니다. 다른 번호를 선택해 주세요.")
 
 
 if __name__ == "__main__":

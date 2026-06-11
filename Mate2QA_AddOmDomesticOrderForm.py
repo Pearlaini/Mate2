@@ -753,9 +753,15 @@ def run_task(page, context, config, *, keep_browser: bool = False):
     )
     # 저장 후 SweetAlert/알림은 자동으로 누르지 않음 (수동 확인)
     click_save_button(page, confirm_swal=False)
-    from Mate2QA_browser_session import wait_enter_after_task
+    from Mate2QA_browser_session import (
+        MSG_KEEP_BROWSER_AFTER_SAVE,
+        wait_enter_after_task,
+    )
 
-    wait_enter_after_task(keep_browser=keep_browser)
+    wait_enter_after_task(
+        keep_browser=keep_browser,
+        message=MSG_KEEP_BROWSER_AFTER_SAVE if keep_browser else None,
+    )
 
 
 def run():

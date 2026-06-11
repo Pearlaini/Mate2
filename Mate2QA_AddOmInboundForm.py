@@ -858,7 +858,10 @@ def click_save_button(page, *, confirm_swal: bool = False):
 
 def run_task(page, context, config, *, keep_browser: bool = False):
     """OMS 입고예정 등록(엑셀 업로드·저장)까지 수행합니다."""
-    from Mate2QA_browser_session import wait_enter_after_task
+    from Mate2QA_browser_session import (
+        MSG_KEEP_BROWSER_AFTER_SAVE,
+        wait_enter_after_task,
+    )
 
     goto_om_put_expect_list(page, config)
     click_inbound_register_button(page)
@@ -873,7 +876,10 @@ def run_task(page, context, config, *, keep_browser: bool = False):
         run_excel_upload_flow(page, config)
 
     click_save_button(page)
-    wait_enter_after_task(keep_browser=keep_browser)
+    wait_enter_after_task(
+        keep_browser=keep_browser,
+        message=MSG_KEEP_BROWSER_AFTER_SAVE if keep_browser else None,
+    )
 
 
 def run():

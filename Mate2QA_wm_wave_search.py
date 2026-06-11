@@ -15,6 +15,21 @@ from Mate2QA_site_config import SEARCH_FILTER_WM_WAVE_FILE
 
 SEARCH_FILTER_FILE = SEARCH_FILTER_WM_WAVE_FILE
 
+OUT_ALLOC_RGST_PATH_FRAGMENT = "outallocrgst.do"
+MSG_OUT_ALLOC_RGST_NO_RESULTS = (
+    "검색결과가 없어 출고차수 할당을 진행할 수 없습니다."
+)
+
+
+class OutAllocRgstSearchEmptyError(Exception):
+    """출고차수할당(outAllocRgst) 화면에서 검색 결과 행이 없을 때."""
+
+
+def print_out_alloc_rgst_no_results() -> None:
+    """출고차수할당 검색 결과 없음 안내를 출력합니다."""
+    print(f"[안내] {MSG_OUT_ALLOC_RGST_NO_RESULTS}", flush=True)
+
+
 DEFAULT_WAVE_PROCESS: Dict[str, str] = {
     "id": "selBoxPackBtn",
     "data_type": "boxPack",
@@ -212,6 +227,15 @@ def _set_input_value(page: Page, selector: str, value: str) -> None:
 
 def capture_wm_wave_filter_from_page(page: Page) -> Dict[str, Any]:
     """출고예정 화면의 검색 조건·선택 주문(od_sno)을 읽어 JSON에 저장합니다."""
+    try:
+        page.locator("#searchDateRange").wait_for(state="visible", timeout=15_000)
+        page.locator("#searchColumn").wait_for(state="visible", timeout=15_000)
+    except PlaywrightTimeoutError as exc:
+        raise ValueError(
+            "출고예정 검색 폼을 찾지 못했습니다. "
+            "화주가 선택되었는지, WMS 출고예정 화면인지 확인해 주세요."
+        ) from exc
+
     existing = load_wm_wave_filter() or {}
     data: Dict[str, Any] = {
         "search_date_range": page.locator("#searchDateRange").input_value(),
@@ -266,6 +290,40 @@ def click_wm_search_button(page: Page) -> None:
 def wait_wm_search_grid(page: Page, timeout_ms: int = 30_000) -> None:
     """Tabulator 그리드가 보일 때까지 대기합니다."""
     page.locator(".tabulator-row").first.wait_for(state="visible", timeout=timeout_ms)
+
+
+def _wm_search_grid_row_count(page: Page) -> int:
+    """현재 화면 Tabulator 데이터 행 수를 반환합니다."""
+    try:
+        return int(
+            page.evaluate(
+                "() => document.querySelectorAll('.tabulator-row').length"
+            )
+            or 0
+        )
+    except Exception:
+        return 0
+
+
+def _is_out_alloc_rgst_page(page: Page) -> bool:
+    return OUT_ALLOC_RGST_PATH_FRAGMENT in (page.url or "").lower()
+
+
+def ensure_alloc_rgst_has_search_results(
+    page: Page, timeout_ms: int = 30_000
+) -> None:
+    """출고차수할당 검색 후 그리드 행이 생길 때까지 대기합니다. 없으면 중단 예외를 냅니다."""
+    if not _is_out_alloc_rgst_page(page):
+        wait_wm_search_grid(page, timeout_ms=timeout_ms)
+        return
+
+    deadline = time.time() + timeout_ms / 1000
+    while time.time() < deadline:
+        if _wm_search_grid_row_count(page) > 0:
+            return
+        page.wait_for_timeout(500)
+
+    raise OutAllocRgstSearchEmptyError(MSG_OUT_ALLOC_RGST_NO_RESULTS)
 
 
 def select_orders_by_od_sno(page: Page, od_snos: List[str]) -> None:
@@ -670,7 +728,7 @@ def fill_out_alloc_rgst_form(page: Page, filter_data: Dict[str, Any]) -> None:
 
 def select_all_alloc_rgst_targets(page: Page) -> None:
     """출고할당 대상 그리드 맨 앞 헤더 체크박스로 검색 결과 전체 선택."""
-    wait_wm_search_grid(page)
+    ensure_alloc_rgst_has_search_results(page)
     click_select_all_orders(page)
 
 

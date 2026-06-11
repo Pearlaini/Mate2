@@ -1036,13 +1036,15 @@ def click_save_button(page, *, confirm_swal: bool = False):
 
 def wait_for_user_save_completion(page, *, keep_browser: bool = False) -> None:
     """저장·닫기 처리 후 사용자 Enter 입력을 기다립니다."""
+    from Mate2QA_browser_session import (
+        MSG_CLOSE_BROWSER_AFTER_SAVE,
+        MSG_KEEP_BROWSER_AFTER_SAVE,
+    )
+
     if keep_browser:
-        msg = (
-            "\n[안내] 저장 또는 닫기 후 Enter를 누르시면 "
-            "메뉴로 돌아갑니다. (브라우저는 유지됩니다)"
-        )
+        msg = f"\n[안내] {MSG_KEEP_BROWSER_AFTER_SAVE}"
     else:
-        msg = "\n[안내] 저장 또는 닫기 후 Enter를 누르시면 팝업창이 닫힙니다."
+        msg = f"\n[안내] {MSG_CLOSE_BROWSER_AFTER_SAVE}"
     print(msg, flush=True)
     try:
         input()
