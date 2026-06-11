@@ -63,7 +63,7 @@ def run():
 
             try:
                 input(
-                    "alert OK 확인 후 종료하려면 Enter..."
+                    "OK 확인 후 Enter를 누르시면 팝업창이 닫힙니다."
                 )
             except EOFError:
                 pass

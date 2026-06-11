@@ -1,4 +1,4 @@
-# QA 주문목록 — 검색 조건 JSON 저장·적용·화주 선택
+# #Mate2QA 공통 모듈 : 검색조건 저장,화주 정보 저장
 
 import json
 from pathlib import Path
@@ -356,11 +356,20 @@ def wait_search_grid(page: Page, timeout_ms: int = 30_000) -> None:
     page.wait_for_timeout(500)
 
 
-def select_shipper_if_configured(page: Page, shipper_label: str) -> None:
-    """pwn_header_change에서 화주를 선택합니다 (터미널·브라우저 직접 선택 지원)."""
+def select_shipper_if_configured(
+    page: Page,
+    shipper_label: str,
+    *,
+    page_ready_selectors: Optional[List[str]] = None,
+) -> None:
+    """지정한 화주명으로 pwn_header_change를 선택합니다 (shipper_select 위임)."""
     from Mate2QA_shipper_select import select_shipper_on_page
 
-    select_shipper_on_page(page, {"shipper_label": shipper_label})
+    select_shipper_on_page(
+        page,
+        {"shipper_label": shipper_label},
+        page_ready_selectors=page_ready_selectors,
+    )
 
 
 def save_search_criteria_from_page(page: Page) -> Dict[str, Any]:

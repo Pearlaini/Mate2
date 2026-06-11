@@ -8,10 +8,28 @@ from playwright.sync_api import (
     TimeoutError as PlaywrightTimeoutError,
 )
 
-from Mate2QA_login import first_visible_locator
+from Mate2QA_login import _is_ably_login_url, first_visible_locator
 from Mate2QA_order_search import load_search_filter
 
 _SHIPPER_SELECT = 'select[name="pwn_header_change"]'
+
+# 화주 change 후 해당 화면 버튼 로딩 대기용 (작업 모듈에서 공통 사용)
+PAGE_READY_WM_INBOUND = ["#btnReqRgst", 'button:has-text("입고등록")']
+PAGE_READY_WM_OUT_EXPECT = [
+    "#outExpectRgstBtn",
+    'button:has-text("출고 수기등록")',
+]
+PAGE_READY_OM_PUT_EXPECT = [
+    "#btnReqRgst",
+    'button:has-text("입고등록")',
+    'button:has-text("등록")',
+]
+PAGE_READY_OM_ORDER_LIST = [
+    'button:has-text("주문서추가")',
+    'a:has-text("주문서추가")',
+    'button:has-text("등록")',
+    'a:has-text("등록")',
+]
 _SHIPPER_PLACEHOLDER = "선택하세요"
 
 _SHIPPER_READ_SCRIPT = """() => {
@@ -26,13 +44,19 @@ _SHIPPER_READ_SCRIPT = """() => {
 
 
 def resolve_shipper_label(config: Dict) -> str:
-    """화주 이름: search_filter_domestic.json → CONFIG 순으로 읽습니다."""
+    """화주 이름: search_filter_domestic.json → CONFIG → 사이트 기본 순으로 읽습니다."""
     data = load_search_filter()
     if data:
         label = (data.get("shipper_label") or "").strip()
         if label:
             return label
-    return (config.get("shipper_label") or "").strip()
+    configured = (config.get("shipper_label") or "").strip()
+    if configured:
+        return configured
+    login_url = (config.get("login_url") or "").strip()
+    if login_url and _is_ably_login_url(login_url):
+        return (config.get("shipper_label_ably_default") or "").strip()
+    return (config.get("shipper_label_default") or "").strip()
 
 
 def _get_shipper_options(page) -> List[Dict[str, str]]:
@@ -85,6 +109,32 @@ def _is_shipper_placeholder(value: str, text: str) -> bool:
     if not value:
         return True
     return text == _SHIPPER_PLACEHOLDER
+
+
+def read_current_shipper_label(page) -> str:
+    """현재 페이지 화주 드롭다운 표시명. '선택하세요'·미선택이면 빈 문자열."""
+    value, text = _read_current_shipper(page, retries=3)
+    if _is_shipper_placeholder(value, text):
+        return ""
+    return text
+
+
+def _wait_for_shipper_dropdown(page, *, timeout_ms: int = 12_000) -> bool:
+    """pwn_header_change 드롭다운이 보이고 option이 로드될 때까지 대기합니다."""
+    if page.locator(_SHIPPER_SELECT).count() == 0:
+        return False
+    try:
+        page.locator(_SHIPPER_SELECT).first.wait_for(state="visible", timeout=timeout_ms)
+        page.wait_for_function(
+            """() => {
+                const el = document.querySelector('select[name="pwn_header_change"]');
+                return el && el.options && el.options.length > 1;
+            }""",
+            timeout=timeout_ms,
+        )
+        return True
+    except PlaywrightTimeoutError:
+        return False
 
 
 def _selectable_shipper_options(options: List[Dict[str, str]]) -> List[Dict[str, str]]:
@@ -323,3 +373,142 @@ def select_shipper_on_page(
         if current_value != picked["value"]:
             _apply_shipper_value(page, picked["value"])
         wait_after_shipper_change(page, page_ready_selectors=page_ready_selectors)
+
+
+def run_change_session_shipper(config: Dict) -> str:
+    """브라우저를 띄워 주문목록에서 화주를 직접 바꾼 뒤 세션을 저장합니다.
+
+    터미널 Enter는 변경 완료 확인용입니다.
+    반환: 변경 후 화주명 (미선택이면 빈 문자열)
+    """
+    from playwright.sync_api import sync_playwright
+
+    from Mate2QA_login import create_context, ensure_login_only, load_env_credentials
+    from Mate2QA_order_search import load_search_filter, save_search_filter
+    from Mate2QA_site_config import STATE_FILE_DOMESTIC
+
+    order_list_url = (config.get("order_list_url") or "").strip()
+    if not order_list_url:
+        raise ValueError("order_list_url이 설정되지 않았습니다.")
+
+    ui_config = {
+        **config,
+        "headless": False,
+        "slow_mo": config.get("slow_mo", 150),
+    }
+    creds = load_env_credentials(config.get("login_url"))
+
+    with sync_playwright() as p:
+        browser, context = create_context(
+            p, ui_config, state_file=STATE_FILE_DOMESTIC
+        )
+        page = context.new_page()
+        try:
+            ensure_login_only(
+                page,
+                context,
+                ui_config,
+                creds,
+                state_file=STATE_FILE_DOMESTIC,
+            )
+            page.goto(order_list_url, wait_until="domcontentloaded")
+            page.wait_for_timeout(800)
+
+            if not _wait_for_shipper_dropdown(page):
+                raise ValueError(
+                    "화주 드롭다운을 찾지 못했습니다. 주문목록 화면을 확인해 주세요."
+                )
+
+            before_label = read_current_shipper_label(page)
+            if before_label:
+                print(f"[안내] 현재 세션 화주: {before_label}", flush=True)
+            else:
+                print("[안내] 현재 화주가 선택되지 않았습니다.", flush=True)
+
+            print(
+                "브라우저 상단의 화주 드롭다운에서 원하는 화주를 선택해 주세요.",
+                flush=True,
+            )
+            print("변경이 끝나면 이 터미널에서 Enter를 눌러 주세요.", flush=True)
+            try:
+                input()
+            except EOFError:
+                pass
+
+            wait_after_shipper_change(
+                page, page_ready_selectors=PAGE_READY_OM_ORDER_LIST
+            )
+            after_label = read_current_shipper_label(page)
+
+            if after_label and after_label != before_label:
+                print(
+                    f"[완료] 화주가 '{before_label or '선택하세요'}' → '{after_label}'(으)로 변경되었습니다.",
+                    flush=True,
+                )
+            elif after_label:
+                print(f"[완료] 화주 '{after_label}'(으)로 세션을 저장했습니다.", flush=True)
+            else:
+                print("[경고] 화주가 아직 '선택하세요' 상태입니다.", flush=True)
+
+            filter_data = load_search_filter() or {}
+            filter_data["shipper_label"] = after_label
+            save_search_filter(filter_data)
+
+            context.storage_state(path=str(STATE_FILE_DOMESTIC))
+            return after_label
+        finally:
+            try:
+                context.storage_state(path=str(STATE_FILE_DOMESTIC))
+            except Exception:
+                pass
+            context.close()
+            browser.close()
+
+
+def probe_session_shipper_label(config: Dict) -> str:
+    """저장 세션으로 주문목록에 접속해 현재 연결된 화주명을 읽습니다 (런처 표시용).
+
+    headless·slow_mo=0으로 최소 비용만 사용합니다.
+    """
+    from playwright.sync_api import sync_playwright
+
+    from Mate2QA_login import create_context, ensure_login_only, load_env_credentials
+    from Mate2QA_site_config import STATE_FILE_DOMESTIC
+
+    order_list_url = (config.get("order_list_url") or "").strip()
+    if not order_list_url:
+        return ""
+
+    probe_config = {
+        **config,
+        "headless": True,
+        "slow_mo": 0,
+        "start_maximized": False,
+    }
+    creds = load_env_credentials(config.get("login_url"))
+
+    with sync_playwright() as p:
+        browser, context = create_context(
+            p, probe_config, state_file=STATE_FILE_DOMESTIC
+        )
+        page = context.new_page()
+        try:
+            ensure_login_only(
+                page,
+                context,
+                probe_config,
+                creds,
+                state_file=STATE_FILE_DOMESTIC,
+            )
+            page.goto(order_list_url, wait_until="domcontentloaded")
+            page.wait_for_timeout(500)
+            if not _wait_for_shipper_dropdown(page):
+                return ""
+            return read_current_shipper_label(page)
+        finally:
+            try:
+                context.storage_state(path=str(STATE_FILE_DOMESTIC))
+            except Exception:
+                pass
+            context.close()
+            browser.close()

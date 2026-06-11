@@ -682,7 +682,7 @@ def run() -> None:
             click_confirm_product_picking_list(page)
 
             try:
-                input("출고확정/재고/피킹 리스트 확인 후 종료하려면 Enter를 누르세요...")
+                input("Enter를 누르시면 팝업창이 닫힙니다.")
             except EOFError:
                 pass
         except PlaywrightTimeoutError:

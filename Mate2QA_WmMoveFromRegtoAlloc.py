@@ -97,7 +97,7 @@ def run():
                 pass
 
             try:
-                input("작업을 마치고 종료하려면 Enter...")
+                input("Enter를 누르시면 팝업창이 닫힙니다.")
             except EOFError:
                 pass
         except PlaywrightTimeoutError:

@@ -1,4 +1,4 @@
-# QA 출고준비 목록 — 선택 주문 이동·WMS 출고 등록 자동화
+# Mate2QA_OmMoveDomestic.py에서 호출되는 함수
 
 from typing import Any, Dict
 
@@ -115,6 +115,5 @@ def run_out_ready_wms_flow(page: Page, filter_data: Dict[str, Any]) -> None:
     # #wmsOutRgstBtn 클릭 후 SweetAlert OK는 자동 클릭하지 않음 (수동 확인)
 
     print(
-        "[안내] 「WMS 출고 등록」(#wmsOutRgstBtn) 클릭까지 완료했습니다. "
-        "alert OK는 화면에서 직접 눌러 주세요."
+        "OK는 화면에서 직접 눌러 주세요."
     )

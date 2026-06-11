@@ -205,7 +205,7 @@ def run():
 
             try:
                 input(
-                    "보류해제 팝업 확인·저장 후 종료하려면 Enter를 누르세요..."
+                    "저장 후 Enter를 누르시면 팝업창이 닫힙니다."
                 )
             except EOFError:
                 pass

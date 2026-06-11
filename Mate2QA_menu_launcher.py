@@ -1,38 +1,74 @@
-# Mate2QA — 로그인 후 작업 메뉴 런처
+# Mate2QA — 작업 메뉴 런처 (로그인은 각 작업 모듈이 담당)
 #
 # 실행: python Mate2QA_menu_launcher.py
 
 import importlib
-import sys
 
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from Mate2QA_shipper_select import probe_session_shipper_label, run_change_session_shipper
+from Mate2QA_site_config import refresh_config_from_env
 
-from Mate2QA_login import (
-    _is_ably_login_url,
-    create_context,
-    ensure_login_only,
-    load_env_credentials,
-)
-from Mate2QA_site_config import CONFIG, STATE_FILE_DOMESTIC, print_site_url_banner, refresh_config_from_env
+# True: 메뉴 표시마다 브라우저로 세션 화주 조회 / False: 런처 시작 1회만 조회
+_PROBE_SHIPPER_EACH_MENU = True
 
-MENU_TEXT = """
-============================================================
-어떤 작업을 진행할지 번호를 입력해 주세요.
+_MENU_BODY = """
+ 0  세션 화주 변경                  / 9  종료
  11  추가: 국내 주문서
- 12  이동: 국내 주문발주~출고준비
- 13  추가: 화주입고
+ 12  이동: 국내 주문발주 ~ 출고준비  / 13  추가: 화주입고
 
- 21  추가: 국내 출고 수기등록
- 22  출고보류해제
+ 21  추가: 국내 출고 수기등록        / 22  출고보류해제
  23  이동: 출고등록 ~ 출고지시
  24  이동: 출고지시 ~ 출고확정(수동)
  25  이동: Wave ~ 출고확정(수동)
 
  31  추가: 입고요청
  41  재고조회(로케이션조회/품목이동)
-  0  종료
 ============================================================
 """
+
+_cached_session_shipper: str | None = None
+
+
+def _shipper_display_config() -> dict:
+    """11번(Mate2QA_AddOmDomesticOrderForm)과 동일한 CONFIG·env 기준입니다."""
+    mod = importlib.import_module("Mate2QA_AddOmDomesticOrderForm")
+    return refresh_config_from_env(mod.CONFIG)
+
+
+def _fetch_session_shipper_label() -> str:
+    """브라우저로 주문목록에 접속해 현재 세션 화주명을 읽습니다."""
+    global _cached_session_shipper
+    if not _PROBE_SHIPPER_EACH_MENU and _cached_session_shipper is not None:
+        return _cached_session_shipper
+
+    print("[안내] 세션 화주를 확인하는 중...", flush=True)
+    config = _shipper_display_config()
+    try:
+        label = (probe_session_shipper_label(config) or "").strip()
+    except Exception as exc:
+        print(f"[경고] 세션 화주 확인 실패: {exc}", flush=True)
+        label = (_cached_session_shipper or "").strip()
+
+    _cached_session_shipper = label
+    return label
+
+
+def format_shipper_banner() -> str:
+    """주문목록 세션에 연결된 화주명을 메뉴 문구로 반환합니다."""
+    label = _fetch_session_shipper_label()
+    if label:
+        return f"(화주: {label})"
+    return "(화주: 선택하세요)"
+
+
+def build_menu_text() -> str:
+    """화주 배너가 포함된 메뉴 문자열을 반환합니다."""
+    shipper_banner = format_shipper_banner()
+    return (
+        "============================================================\n"
+        f"어떤 작업을 진행할지 번호를 입력해 주세요. {shipper_banner}\n"
+        f"{_MENU_BODY}"
+    )
+
 
 # 아직 연결되지 않은 메뉴
 _PENDING_CHOICES: frozenset[str] = frozenset()
@@ -52,8 +88,8 @@ _COMMON_TASKS = {
 }
 
 
-def resolve_task_module(choice: str, login_url: str) -> str | None:
-    """입력 번호와 로그인 URL에 따라 실행할 모듈 이름을 반환합니다."""
+def resolve_task_module(choice: str) -> str | None:
+    """입력 번호에 따라 실행할 모듈 이름을 반환합니다."""
     if choice in _PENDING_CHOICES:
         print("[안내] 해당 메뉴는 아직 준비 중입니다.")
         return None
@@ -71,49 +107,33 @@ def run_task_module(module_name: str) -> None:
     run_fn()
 
 
-def perform_initial_login() -> str:
-    """로그인만 수행하고 세션을 저장합니다. 로그인 URL을 반환합니다."""
-    print_site_url_banner()
-    config = refresh_config_from_env(CONFIG)
-    creds = load_env_credentials(config["login_url"])
-
-    with sync_playwright() as p:
-        browser, context = create_context(p, config, state_file=STATE_FILE_DOMESTIC)
-        page = context.new_page()
-        try:
-            ensure_login_only(page, context, config, creds, state_file=STATE_FILE_DOMESTIC)
-        except PlaywrightTimeoutError:
-            raise
-        finally:
-            context.storage_state(path=str(STATE_FILE_DOMESTIC))
-            context.close()
-            browser.close()
-
-    return config["login_url"]
-
-
 def main() -> None:
-    """로그인 후 메뉴에서 작업을 선택해 실행합니다. 0 또는 Ctrl+C 전까지 반복합니다."""
-    try:
-        login_url = perform_initial_login()
-    except KeyboardInterrupt:
-        return
-    except Exception as exc:
-        sys.exit(1)
-
-    site_label = "Ably(qa-style)" if _is_ably_login_url(login_url) else "기본(qa-oms 등)"
-
+    """메뉴에서 작업을 선택해 실행합니다. 9 또는 Ctrl+C 전까지 반복합니다."""
     while True:
-        print(MENU_TEXT)
+        print(build_menu_text())
         try:
             choice = input("번호 입력: ").strip()
         except (EOFError, KeyboardInterrupt):
             break
 
-        if choice == "0":
+        if choice == "9":
             break
 
-        module_name = resolve_task_module(choice, login_url)
+        if choice == "0":
+            try:
+                global _cached_session_shipper
+                config = _shipper_display_config()
+                _cached_session_shipper = (
+                    run_change_session_shipper(config) or ""
+                ).strip() or None
+                print("[안내] 메뉴로 돌아갑니다. 변경된 화주가 배너에 표시됩니다.")
+            except KeyboardInterrupt:
+                pass
+            except Exception as exc:
+                print(f"[오류] {exc}")
+            continue
+
+        module_name = resolve_task_module(choice)
         if not module_name:
             if choice not in _PENDING_CHOICES:
                 print(f"[경고] 알 수 없는 번호입니다: {choice}")
@@ -121,7 +141,7 @@ def main() -> None:
 
         try:
             run_task_module(module_name)
-            print("[안내] 다음 작업 번호를 입력해 주세요. (0=종료)")
+            print("[안내] 다음 작업 번호를 입력해 주세요. (9=종료)")
         except KeyboardInterrupt:
             pass
         except Exception as exc:

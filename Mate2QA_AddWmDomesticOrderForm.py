@@ -13,6 +13,7 @@ from Mate2QA_login import (
     load_env_credentials,
     popup_page_zoom,
 )
+from Mate2QA_shipper_select import PAGE_READY_WM_OUT_EXPECT, select_shipper_on_page
 from Mate2QA_site_config import (
     CONFIG as _SITE_CONFIG,
     OUT_EXPECT_LIST_PATH,
@@ -27,6 +28,8 @@ from Mate2QA_site_config import (
 CONFIG = {
     **_SITE_CONFIG,
     "out_expect_list_path": OUT_EXPECT_LIST_PATH,
+    # 화주 (search_filter_domestic.json shipper_label 우선, 없으면 아래 값)
+    "shipper_label": "",
     "address_search_keyword": "지플러스타워",
     "sach_cd_value": "SACH0020",
     "target_product_search_keyword": "크래커",
@@ -34,13 +37,15 @@ CONFIG = {
 
 STATE_FILE = STATE_FILE_DOMESTIC
 
-
 def goto_out_expect_list(page, config: Dict) -> None:
-    """WMS 출고예정 목록(/wm/out/reg/outExpectList.do)으로 이동합니다."""
+    """WMS 출고예정 목록으로 이동한 뒤 화주를 선택합니다."""
     path = config.get("out_expect_list_path", OUT_EXPECT_LIST_PATH)
     url = join_origin_path(config["login_url"], path)
     page.goto(url, wait_until="domcontentloaded")
     page.wait_for_timeout(1000)
+    select_shipper_on_page(
+        page, config, page_ready_selectors=PAGE_READY_WM_OUT_EXPECT
+    )
 
 
 def click_out_expect_manual_register(page) -> None:
@@ -588,7 +593,7 @@ def search_outbound_item_popup(page, keyword: str) -> None:
 
 
 def run() -> None:
-    """로그인 → 출고 수기등록 폼 입력 → 출고대상 품목 팝업 검색까지만 수행."""
+    """로그인 → 출고예정 화주 선택 → 수기등록 폼 입력 → 출고대상 품목 팝업 검색까지만 수행."""
     print_site_url_banner()
     creds = load_env_credentials()
     now = datetime.now()
@@ -607,7 +612,7 @@ def run() -> None:
                 page, CONFIG.get("target_product_search_keyword", "크래커")
             )
             try:
-                input("팝업창을 확인한 뒤 종료하려면 Enter를 누르세요...")
+                input("Enter를 누르시면 팝업창이 닫힙니다.")
             except EOFError:
                 page.wait_for_timeout(600_000)
         except PlaywrightTimeoutError:

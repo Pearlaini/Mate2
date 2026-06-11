@@ -18,7 +18,7 @@ from Mate2QA_site_config import (
     print_site_url_banner,
 )
 from Mate2QA_order_step import click_popup_ok_if_visible
-from Mate2QA_shipper_select import select_shipper_on_page
+from Mate2QA_shipper_select import PAGE_READY_WM_INBOUND, select_shipper_on_page
 
 # =========================
 # 사용자 설정 영역
@@ -39,21 +39,13 @@ CONFIG = {
 
 STATE_FILE = STATE_FILE_DOMESTIC
 
-_WM_INBOUND_PAGE_READY = ["#btnReqRgst", 'button:has-text("입고등록")']
-
-
-def select_company_value(page, config: Dict) -> None:
-    """WMS 입고요청 목록 화면에서 화주를 선택합니다."""
-    select_shipper_on_page(
-        page, config, page_ready_selectors=_WM_INBOUND_PAGE_READY
-    )
-
-
 def goto_wm_put_req_list(page, config: Dict):
     """WMS 입고요청 목록 화면으로 이동한 뒤 화주를 선택합니다."""
     page.goto(config["wm_put_req_list_url"], wait_until="domcontentloaded")
     page.wait_for_timeout(1000)
-    select_company_value(page, config)
+    select_shipper_on_page(
+        page, config, page_ready_selectors=PAGE_READY_WM_INBOUND
+    )
 
 
 def click_inbound_register_button(page):
@@ -1045,7 +1037,7 @@ def click_save_button(page, *, confirm_swal: bool = False):
 def wait_for_user_save_completion(page) -> None:
     """저장·닫기 처리 후 사용자 Enter 입력을 기다립니다."""
     print(
-        "\n[안내] 화면에서 저장 또는 닫기 후 종료하시려면 엔터를 눌러주세요",
+        "\n[안내] 저장 또는 닫기 후 Enter를 누르시면 팝업창이 닫힙니다.",
         flush=True,
     )
     try:

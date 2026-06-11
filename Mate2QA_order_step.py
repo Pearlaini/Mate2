@@ -1,4 +1,4 @@
-# QA 주문목록 — 다음 단계 → 선택 주문서처리로
+# #Mate2QA 공통 모듈 :  주문목록 — 다음 단계 → 선택 주문서처리로
 
 from contextlib import contextmanager
 from typing import Iterator

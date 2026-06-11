@@ -162,7 +162,7 @@ def run():
             run_stock_search(transfer_page, keyword)
 
             try:
-                input("재고/재고이동내역 화면 확인 후 종료하려면 Enter를 누르세요...")
+                input("Enter를 누르시면 팝업창이 닫힙니다.")
             except EOFError:
                 pass
         except PlaywrightTimeoutError:

@@ -22,8 +22,8 @@ from Mate2QA_site_config import (
 
 # 로그인 후 이동 — OMS 입고예정 목록
 OM_PUT_EXPECT_LIST_PATH = "/om/put/expect/expectList.do"
-from Mate2QA_order_search import load_search_filter, select_shipper_if_configured
 from Mate2QA_order_step import click_popup_ok_if_visible
+from Mate2QA_shipper_select import PAGE_READY_OM_PUT_EXPECT, select_shipper_on_page
 
 # =========================
 # 사용자 설정 영역
@@ -50,47 +50,15 @@ CONFIG = {
 STATE_FILE = STATE_FILE_DOMESTIC
 
 
-def resolve_shipper_label(config: Dict) -> str:
-    """화주 이름: search_filter_domestic.json → CONFIG 순으로 읽습니다."""
-    data = load_search_filter()
-    if data:
-        label = (data.get("shipper_label") or "").strip()
-        if label:
-            return label
-    return (config.get("shipper_label") or "").strip()
-
-
-def select_company_value(page, config: Dict) -> None:
-    """pwn_header_change에서 화주사를 선택합니다."""
-    target_label = resolve_shipper_label(config)
-    if not target_label:
-        return
-
-    selector = 'select[name="pwn_header_change"]'
-    try:
-        page.locator(selector).first.wait_for(state="visible", timeout=15_000)
-        page.wait_for_function(
-            """() => {
-                const el = document.querySelector('select[name="pwn_header_change"]');
-                return el && el.options && el.options.length > 1;
-            }""",
-            timeout=15_000,
-        )
-    except PlaywrightTimeoutError:
-
-
-        pass
-
-    select_shipper_if_configured(page, target_label)
-
-
 def goto_om_put_expect_list(page, config: Dict):
     """OMS 입고예정 목록 화면으로 이동한 뒤 화주를 선택합니다."""
     target_url = config["om_put_expect_list_url"]
     page.goto(target_url, wait_until="domcontentloaded")
     page.wait_for_timeout(1000)
 
-    select_company_value(page, config)
+    select_shipper_on_page(
+        page, config, page_ready_selectors=PAGE_READY_OM_PUT_EXPECT
+    )
 
 
 def click_inbound_register_button(page):
@@ -880,7 +848,7 @@ def click_save_button(page, *, confirm_swal: bool = False):
     else:
         try:
             popup.first.wait_for(state="visible", timeout=3000)
-            print("[안내] 저장 확인창이 떴습니다. '확인'은 자동으로 누르지 않았습니다.")
+            print("[주의] 자동으로 '저장'하지 않습니다.")
         except PlaywrightTimeoutError:
             print(
                 "[안내] 저장 버튼은 클릭했습니다. "
@@ -918,7 +886,7 @@ def run():
                 else "엑셀 업로드·저장"
             )
             try:
-                input("확인창에서 직접 처리하신 뒤, 종료하려면 Enter를 누르세요...")
+                input("Enter를 누르시면 팝업창이 닫힙니다.")
             except EOFError:
                 pass
         except PlaywrightTimeoutError:

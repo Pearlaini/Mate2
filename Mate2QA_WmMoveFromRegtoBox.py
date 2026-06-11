@@ -167,7 +167,7 @@ def run():
 
             try:
                 input(
-                    "화면에서 박스추천 결과를 확인한 뒤, 종료하려면 Enter..."
+                    "Enter를 누르시면 팝업창이 닫힙니다."
                 )
             except EOFError:
                 pass

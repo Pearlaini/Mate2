@@ -13,7 +13,7 @@ from Mate2QA_login import (
     load_env_credentials,
     popup_page_zoom,
 )
-from Mate2QA_order_search import load_search_filter, select_shipper_if_configured
+from Mate2QA_shipper_select import PAGE_READY_OM_ORDER_LIST, select_shipper_on_page
 from Mate2QA_site_config import (
     CONFIG as _SITE_CONFIG,
     STATE_FILE_DOMESTIC,
@@ -29,6 +29,8 @@ CONFIG = {
     **_SITE_CONFIG,
     # 화주 (search_filter_domestic.json shipper_label 우선, 없으면 아래 값·사이트 기본)
     "shipper_label": "",
+    "shipper_label_ably_default": "아이니",
+    "shipper_label_default": "",
     # 국내 수기 화면의 판매채널 option value (없으면 목록 첫 번째)
     "sach_cd_value": "SACH0020",
     # 상품코드 (비우면 Ably/기본 사이트별 기본값 사용)
@@ -52,22 +54,6 @@ CONFIG = {
 STATE_FILE = STATE_FILE_DOMESTIC
 
 
-def resolve_shipper_label(config: Dict) -> str:
-    """화주 이름: search_filter_domestic.json → CONFIG → 사이트 기본 순."""
-    data = load_search_filter()
-    if data:
-        label = (data.get("shipper_label") or "").strip()
-        if label:
-            return label
-    configured = (config.get("shipper_label") or "").strip()
-    if configured:
-        return configured
-    login_url = (config.get("login_url") or "").strip()
-    if _is_ably_login_url(login_url):
-        return "아이니"
-    return "★샘플 화주사"
-
-
 def resolve_sample_product_cd(config: Dict) -> str:
     """상품코드: CONFIG 지정값 → 사이트 기본 순."""
     configured = (config.get("sample_product_cd") or "").strip()
@@ -79,36 +65,14 @@ def resolve_sample_product_cd(config: Dict) -> str:
     return "P000000000005754"
 
 
-def select_company_value(page, config: Dict):
-    """pwn_header_change에서 화주사를 선택합니다."""
-    target_label = resolve_shipper_label(config)
-    if not target_label:
-        return
-
-    selector = 'select[name="pwn_header_change"]'
-    try:
-        page.locator(selector).first.wait_for(state="visible", timeout=15_000)
-        page.wait_for_function(
-            """() => {
-                const el = document.querySelector('select[name="pwn_header_change"]');
-                return el && el.options && el.options.length > 1;
-            }""",
-            timeout=15_000,
-        )
-    except PlaywrightTimeoutError:
-
-
-        pass
-
-    select_shipper_if_configured(page, target_label)
-
-
 def open_domestic_order_register_page(page, config: Dict):
     """국내 주문목록으로 이동한 뒤 주문서 추가 화면으로 진입합니다."""
     page.goto(config["order_list_url"], wait_until="domcontentloaded")
     page.wait_for_timeout(1000)
 
-    select_company_value(page, config)
+    select_shipper_on_page(
+        page, config, page_ready_selectors=PAGE_READY_OM_ORDER_LIST
+    )
 
     add_btn_candidates = [
         'button:has-text("주문서추가")',
@@ -125,7 +89,9 @@ def open_domestic_order_register_page(page, config: Dict):
 
     page.goto(config["order_register_url"], wait_until="domcontentloaded")
     page.wait_for_timeout(1200)
-    select_company_value(page, config)
+    select_shipper_on_page(
+        page, config, page_ready_selectors=PAGE_READY_OM_ORDER_LIST
+    )
 
 
 def select_domestic_sach_cd(page, sach_cd_value: str):
@@ -703,7 +669,7 @@ def click_save_button(page, *, confirm_swal: bool = True):
     else:
         try:
             popup.first.wait_for(state="visible", timeout=3000)
-            print("[안내] 저장 확인창이 떴습니다. '확인'은 자동으로 누르지 않았습니다.")
+            print("[주의] 자동으로 '저장'하지 않습니다.")
         except PlaywrightTimeoutError:
             print(
                 "[안내] 저장 버튼은 클릭했습니다. "
@@ -773,7 +739,6 @@ def run():
     config = refresh_config_from_env(CONFIG)
     creds = load_env_credentials(config["login_url"])
     product_cd = resolve_sample_product_cd(config)
-    shipper = resolve_shipper_label(config)
     now = datetime.now()
     stamp_yymmddhhmm = now.strftime("%y%m%d%H%M")
     stamp_yymmddhh = now.strftime("%y%m%d%H")
@@ -798,7 +763,7 @@ def run():
             # 저장 후 SweetAlert/알림은 자동으로 누르지 않음 (수동 확인)
             click_save_button(page, confirm_swal=False)
             try:
-                input("확인창에서 직접 처리하신 뒤, 종료하려면 Enter를 누르세요...")
+                input("Enter를 누르시면 팝업창이 닫힙니다.")
             except EOFError:
                 pass
         except PlaywrightTimeoutError:
