@@ -1,9 +1,9 @@
-# QA WMS 전체 플로우 — 출고예정 → WAVE → 할당 → 출고작업 → 전체박스 추천 실행
+# QA WMS 전체 플로우 — 출고예정 → WAVE → 할당 → 출고작업 → 출고지시
 #
 # 1) 출고예정: 날짜·채널·주문 선택 후 Enter → WAVE
 # 2) 웨이브 목록: 저장 조건 검색 → 주소정제(필요 시)
 # 3) 출고차수할당 → 출고차수명 JSON 저장
-# 4) 출고작업: 출고차수명 검색 → 출고지시 → 박스추천 → 전체박스 추천 실행 후 종료
+# 4) 출고작업: 출고차수명 검색 → 출고지시 탭까지 (박스추천은 24번)
 #
 # 사이트 URL: Mate2QA_site_config.py (상대 path)
 
@@ -25,19 +25,19 @@ from Mate2QA_site_config import (
 )
 from Mate2QA_wm_wave_search import (
     OutAllocRgstSearchEmptyError,
+    OutWkOrdSearchEmptyError,
     print_out_alloc_rgst_no_results,
+    print_out_wk_ord_no_results,
     apply_wm_wave_search,
     capture_wave_selected_row_context,
     capture_wm_wave_filter_from_page,
     click_address_refine,
     click_out_alloc_assign,
     click_out_alloc_rgst_button,
-    click_box_recommend_dropdown,
     click_out_wk_ord_instruction_tab,
-    click_total_box_recommend_btn,
     fill_out_alloc_rgst_form,
     is_dlvr_div_empty,
-    load_out_tseq_nm,
+    capture_out_tseq_nm_from_alloc_page,
     run_wave_process_on_expect_list,
     search_out_wk_ord_by_tseq_nm,
     select_all_alloc_rgst_targets,
@@ -124,13 +124,18 @@ def select_depot_cd_if_needed(page) -> None:
 
 
 def run_task(page, context, config, *, keep_browser: bool = False):
-    """출고예정~할당 → 출고작업 전체박스 추천 실행까지."""
+    """출고예정~할당 → 출고작업 출고지시 탭까지."""
     from Mate2QA_browser_session import wait_enter_after_task
 
     goto_out_expect_list(page, config)
 
+    print(
+        "[안내] 출고예정 화면에서 날짜·채널을 맞춘 뒤 "
+        "처리할 주문을 체크하고 Enter를 눌러 주세요.",
+        flush=True,
+    )
     try:
-        input("이동할 주문서를 선택 후 Enter...")
+        input()
     except EOFError:
         pass
 
@@ -141,6 +146,10 @@ def run_task(page, context, config, *, keep_browser: bool = False):
             "출고예정 목록에서 주문을 체크한 뒤 Enter를 눌러 주세요."
         )
 
+    print(
+        "[안내] 3초 이내 WAVE 미변경 시 '화주 합포장 기준'으로 진행됩니다.",
+        flush=True,
+    )
     run_wave_process_on_expect_list(page, filter_data)
 
     if "outWaveList.do" not in page.url:
@@ -168,30 +177,32 @@ def run_task(page, context, config, *, keep_browser: bool = False):
         print_out_alloc_rgst_no_results()
         return
 
+    out_tseq_nm = capture_out_tseq_nm_from_alloc_page(page)
+    if not out_tseq_nm:
+        raise ValueError(
+            "출고차수명(out_tseq_nm)이 비어 있습니다. "
+            "출고차수할당 화면 #out_tseq_nm 값을 확인해 주세요."
+        )
+
     click_out_alloc_rgst_button(page)
     wait_for_out_wk_ord_after_alloc(page, config)
 
-    out_tseq_nm = load_out_tseq_nm()
-    if not out_tseq_nm:
-        raise ValueError(
-            "출고차수명(out_tseq_nm)이 JSON에 없습니다. "
-            "출고차수할당 단계(fill_out_alloc_rgst_form)를 확인해 주세요."
-        )
-
-    search_out_wk_ord_by_tseq_nm(page, out_tseq_nm)
-    select_out_wk_ord_row_by_tseq_nm(page, out_tseq_nm)
     try:
+        search_out_wk_ord_by_tseq_nm(page, out_tseq_nm)
+        select_out_wk_ord_row_by_tseq_nm(page, out_tseq_nm)
+        print("[안내] 출고지시 탭 로드 중...", flush=True)
         click_out_wk_ord_instruction_tab(page)
-        click_box_recommend_dropdown(page)
-        click_total_box_recommend_btn(page)
+    except OutWkOrdSearchEmptyError:
+        print_out_wk_ord_no_results()
     except PlaywrightTimeoutError as exc:
-        if "grid-table-tab3" not in str(exc):
+        if "grid-table-tab3" in str(exc):
+            print(
+                "[경고] 출고지시 그리드(#grid-table-tab3) 로딩이 지연되었습니다. "
+                "화면에서 직접 확인해 주세요.",
+                flush=True,
+            )
+        else:
             raise
-        print(
-            "[경고] 출고지시 그리드(#grid-table-tab3) 로딩이 지연되어 "
-            "박스추천 단계는 건너뜁니다. 화면에서 직접 확인해 주세요.",
-            flush=True,
-        )
 
     wait_enter_after_task(keep_browser=keep_browser)
 
@@ -203,6 +214,8 @@ def run():
     try:
         run_with_browser(run_task, config=CONFIG, state_file=STATE_FILE)
     except OutAllocRgstSearchEmptyError:
+        return
+    except OutWkOrdSearchEmptyError:
         return
     except PlaywrightTimeoutError as exc:
         if "grid-table-tab3" in str(exc):

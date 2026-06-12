@@ -113,7 +113,3 @@ def run_out_ready_wms_flow(page: Page, filter_data: Dict[str, Any]) -> None:
     _click_wms_out_dropdown_menu(page)
     _click_wms_out_register_in_popup(page)
     # #wmsOutRgstBtn 클릭 후 SweetAlert OK는 자동 클릭하지 않음 (수동 확인)
-
-    print(
-        "OK는 화면에서 직접 눌러 주세요."
-    )

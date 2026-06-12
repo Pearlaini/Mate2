@@ -90,7 +90,7 @@ def fill_field(page, field_name: str, value: str, *, required: bool = True) -> N
 
 
 def select_sach_cd(page, option_value: str) -> None:
-    """판매채널(sach_cd)을 value 기준으로 선택합니다."""
+    """판매채널(sach_cd)을 value 기준으로 선택합니다. J채널 없으면 첫 항목을 선택합니다."""
     select_loc = page.locator('select[name="sach_cd"]').first
     if select_loc.count() == 0:
         raise ValueError("select[name='sach_cd'] 요소를 찾지 못했습니다.")
@@ -98,23 +98,30 @@ def select_sach_cd(page, option_value: str) -> None:
     picked = select_loc.evaluate(
         """(el, target) => {
             const opts = Array.from(el.options || []);
-            if (opts.some(o => o.value === target)) {
-                el.value = target;
+            const pick = (opt) => {
+                if (!opt || opt.disabled) return '';
+                el.value = opt.value;
                 el.dispatchEvent(new Event('change', { bubbles: true }));
-                return target;
-            }
-            const byLabel = opts.find(o => o.textContent && o.textContent.trim() === 'J채널');
-            if (byLabel) {
-                el.value = byLabel.value;
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-                return byLabel.value;
-            }
-            return '';
+                return opt.value;
+            };
+
+            const byValue = opts.find((o) => o.value === target);
+            if (byValue) return pick(byValue);
+
+            const byLabel = opts.find(
+                (o) => o.textContent && o.textContent.trim() === 'J채널'
+            );
+            if (byLabel) return pick(byLabel);
+
+            const first = opts.find(
+                (o) => (o.value || '').trim() !== '' && !o.disabled
+            );
+            return first ? pick(first) : '';
         }""",
         option_value,
     )
     if not picked:
-        raise ValueError(f"sach_cd에서 value={option_value}(J채널)을 선택하지 못했습니다.")
+        raise ValueError("sach_cd에서 선택 가능한 판매채널이 없습니다.")
 
 
 def _root_wait_ms(root: Union[Page, Frame], ms: int) -> None:

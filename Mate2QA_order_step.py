@@ -1,5 +1,6 @@
 # #Mate2QA 공통 모듈 :  주문목록 — 다음 단계 → 선택 주문서처리로
 
+import time
 from contextlib import contextmanager
 from typing import Iterator
 
@@ -15,10 +16,36 @@ ROW_CHECKBOX = (
 NEXT_STEP_BTN = 'button:has-text("다음 단계")'
 MENU_SELECT = "#select_od_confirm"
 
-# 출고작업(outWkOrdList) 「전체 다음단계」 처리 실패 시 표시되는 alert 문구
-OUT_WK_ORD_PROCESSING_ERROR = "처리중 오류가 발생하였습니다."
+# 출고작업(outWkOrdList) 「전체 다음단계」 등 처리 실패 alert 감지 문구 (부분 일치)
+OUT_WK_ORD_PROCESSING_ERROR = "처리중 오류"
+
+MSG_OUT_WK_ORD_PROCESSING_ABORT = (
+    "처리중 오류 alert — 출고작업 후속 단계를 중단하고 메뉴로 돌아갑니다."
+)
 
 _abort_on_messages: tuple[str, ...] = ()
+
+
+class OutWkOrdProcessingError(Exception):
+    """출고작업 화면에서 처리중 오류 alert가 표시되었습니다."""
+
+    def __init__(self, alert_message: str = "") -> None:
+        self.alert_message = (alert_message or "").strip()
+        super().__init__(self.alert_message)
+
+
+def print_out_wk_ord_processing_error(
+    exc: OutWkOrdProcessingError | None = None,
+) -> None:
+    """처리중 오류 alert로 작업이 중단되었음을 안내합니다."""
+    print(f"[경고] {MSG_OUT_WK_ORD_PROCESSING_ABORT}", flush=True)
+    if exc and exc.alert_message:
+        print(f"       alert: {exc.alert_message}", flush=True)
+
+
+def get_abort_popup_messages() -> tuple[str, ...]:
+    """abort_popup_on_messages 컨텍스트에 등록된 감지 문구를 반환합니다."""
+    return _abort_on_messages
 
 
 @contextmanager
@@ -33,18 +60,163 @@ def abort_popup_on_messages(*messages: str) -> Iterator[None]:
         _abort_on_messages = old
 
 
-def _read_swal_message(page: Page) -> str:
-    """표시 중인 SweetAlert 본문 텍스트를 읽습니다."""
-    popup = page.locator(".swal2-popup.swal2-show").first
-    if popup.count() == 0:
-        return ""
-    for sel in ("#swal2-content", ".swal2-html-container", ".swal2-title"):
-        loc = popup.locator(sel).first
-        if loc.count() > 0:
-            text = (loc.inner_text() or "").strip()
-            if text:
-                return text
-    return (popup.inner_text() or "").strip()
+def _normalize_alert_text(text: str) -> str:
+    """alert 비교용 — 공백·줄바꿈을 제거합니다."""
+    return "".join((text or "").split())
+
+
+def _message_matches_tokens(message: str, tokens: tuple[str, ...]) -> bool:
+    """지정 문구가 alert 본문에 포함되는지 확인합니다 (공백 무시 부분 일치)."""
+    if not message or not tokens:
+        return False
+    norm_message = _normalize_alert_text(message)
+    for token in tokens:
+        if not token:
+            continue
+        if token in message or _normalize_alert_text(token) in norm_message:
+            return True
+    return False
+
+
+def _probe_visible_popup(page: Page) -> dict:
+    """화면에 보이는 SweetAlert·모달 팝업을 조사합니다."""
+    return page.evaluate(
+        """() => {
+            const selectors = [
+                '.swal2-popup.swal2-show',
+                '.swal2-container.swal2-shown .swal2-popup',
+                '.modal.show',
+                '.modal.in',
+                '[role="dialog"]',
+            ];
+            const confirmSelectors = [
+                'button.swal2-confirm.swal2-styled',
+                'button.swal2-confirm',
+                'button.btn-primary',
+                'button.close',
+            ];
+
+            const isVisible = (el) => {
+                if (!el) return false;
+                const style = window.getComputedStyle(el);
+                const rect = el.getBoundingClientRect();
+                return style.display !== 'none'
+                    && style.visibility !== 'hidden'
+                    && rect.width > 0
+                    && rect.height > 0;
+            };
+
+            const roots = [];
+            const seen = new Set();
+            for (const sel of selectors) {
+                for (const el of document.querySelectorAll(sel)) {
+                    if (!isVisible(el) || seen.has(el)) continue;
+                    seen.add(el);
+                    roots.push(el);
+                }
+            }
+
+            for (const root of roots) {
+                const text = (root.innerText || '').trim();
+                if (!text) continue;
+
+                let confirmSelector = '';
+                for (const sel of confirmSelectors) {
+                    const btn = Array.from(root.querySelectorAll(sel)).find(isVisible);
+                    if (btn) {
+                        confirmSelector = sel;
+                        break;
+                    }
+                }
+                if (!confirmSelector) {
+                    const btn = Array.from(root.querySelectorAll('button, a.btn'))
+                        .find((el) => {
+                            if (!isVisible(el)) return false;
+                            const label = (el.innerText || '').trim();
+                            return label === 'OK' || label === '확인';
+                        });
+                    if (btn) confirmSelector = 'button';
+                }
+
+                return {
+                    found: true,
+                    text,
+                    hasConfirm: !!confirmSelector,
+                    confirmSelector,
+                };
+            }
+            return { found: false, text: '', hasConfirm: false, confirmSelector: '' };
+        }"""
+    )
+
+
+def _click_visible_popup_confirm(
+    page: Page, probe: dict, *, settle_ms: int = 300
+) -> bool:
+    """조사된 팝업에서 확인 버튼을 클릭합니다."""
+    if not probe.get("hasConfirm"):
+        return False
+    clicked = page.evaluate(
+        """() => {
+            const selectors = [
+                '.swal2-popup.swal2-show',
+                '.swal2-container.swal2-shown .swal2-popup',
+                '.modal.show',
+                '.modal.in',
+                '[role="dialog"]',
+            ];
+            const confirmSelectors = [
+                'button.swal2-confirm.swal2-styled',
+                'button.swal2-confirm',
+                'button.btn-primary',
+                'button.close',
+            ];
+
+            const isVisible = (el) => {
+                if (!el) return false;
+                const style = window.getComputedStyle(el);
+                const rect = el.getBoundingClientRect();
+                return style.display !== 'none'
+                    && style.visibility !== 'hidden'
+                    && rect.width > 0
+                    && rect.height > 0;
+            };
+
+            const roots = [];
+            const seen = new Set();
+            for (const sel of selectors) {
+                for (const el of document.querySelectorAll(sel)) {
+                    if (!isVisible(el) || seen.has(el)) continue;
+                    seen.add(el);
+                    roots.push(el);
+                }
+            }
+
+            for (const root of roots) {
+                for (const sel of confirmSelectors) {
+                    const btn = Array.from(root.querySelectorAll(sel)).find(isVisible);
+                    if (btn) {
+                        btn.click();
+                        return true;
+                    }
+                }
+                const btn = Array.from(root.querySelectorAll('button, a.btn'))
+                    .find((el) => {
+                        if (!isVisible(el)) return false;
+                        const label = (el.innerText || '').trim();
+                        return label === 'OK' || label === '확인';
+                    });
+                if (btn) {
+                    btn.click();
+                    return true;
+                }
+            }
+            return false;
+        }"""
+    )
+    if clicked:
+        page.wait_for_timeout(settle_ms)
+    return bool(clicked)
 
 
 def goto_put_order_list(page: Page, order_list_url: str | None = None) -> None:
@@ -59,43 +231,63 @@ def click_popup_ok_if_visible(
     timeout_ms: int = 5000,
     *,
     abort_on_messages: tuple[str, ...] | None = None,
+    settle_ms: int = 300,
+    poll_ms: int = 150,
 ) -> bool:
-    """SweetAlert 등 팝업이 보이면 OK(확인) 버튼을 클릭합니다."""
-    popup = page.locator(".swal2-popup.swal2-show")
-    try:
-        popup.first.wait_for(state="visible", timeout=timeout_ms)
-    except PlaywrightTimeoutError:
-        return False
-
-    message = _read_swal_message(page)
+    """SweetAlert·모달 팝업이 보이면 OK(확인) 버튼을 클릭합니다."""
     tokens = abort_on_messages if abort_on_messages is not None else _abort_on_messages
-    is_abort = bool(tokens and message and any(token in message for token in tokens))
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        probe = _probe_visible_popup(page)
+        if not probe.get("found"):
+            page.wait_for_timeout(poll_ms)
+            continue
 
-    confirm_candidates = [
-        "button.swal2-confirm.swal2-styled",
-        'button.swal2-confirm:has-text("OK")',
-        'button.swal2-confirm:has-text("확인")',
-        'button:has-text("OK")',
-        'button:has-text("확인")',
-    ]
-    clicked = False
-    for sel in confirm_candidates:
-        btn = popup.locator(sel).first
-        if btn.count() > 0 and btn.is_visible():
-            btn.click()
-            page.wait_for_timeout(800)
-            clicked = True
-            break
+        message = str(probe.get("text") or "").strip()
+        is_abort = _message_matches_tokens(message, tokens)
+        clicked = _click_visible_popup_confirm(page, probe, settle_ms=settle_ms)
 
-    if is_abort:
-        raise ValueError(
-            "오류 alert가 표시되어 작업을 중단합니다. "
-            f"메시지: {message}"
-        )
+        if is_abort:
+            raise OutWkOrdProcessingError(message)
 
-    if not clicked:
-        pass
-    return clicked
+        if clicked:
+            return True
+
+        if message:
+            return False
+
+        page.wait_for_timeout(poll_ms)
+
+    return False
+
+
+def wait_out_wk_ord_popups_after_next_step(
+    page: Page,
+    *,
+    max_wait_ms: int = 25_000,
+) -> None:
+    """출고작업 「전체 다음단계」 클릭 후 alert를 폴링합니다. 처리중 오류 시 즉시 중단."""
+    deadline = time.monotonic() + max_wait_ms / 1000
+    dismissed = 0
+    idle_rounds = 0
+
+    while time.monotonic() < deadline:
+        try:
+            clicked = click_popup_ok_if_visible(page, timeout_ms=600)
+        except OutWkOrdProcessingError:
+            raise
+
+        if clicked:
+            dismissed += 1
+            idle_rounds = 0
+            if dismissed >= 3:
+                return
+            continue
+
+        idle_rounds += 1
+        if dismissed > 0 and idle_rounds >= 3:
+            return
+        page.wait_for_timeout(400)
 
 
 def dismiss_popup_ok(page: Page, max_attempts: int = 3) -> None:

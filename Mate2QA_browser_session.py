@@ -101,16 +101,71 @@ class BrowserSession:
         )
         return self
 
+    def _is_alive(self) -> bool:
+        """Chromium·컨텍스트가 아직 사용 가능한지 확인합니다."""
+        try:
+            if not self.browser or not self.context:
+                return False
+            return self.browser.is_connected()
+        except Exception:
+            return False
+
+    def _teardown_browser(self) -> None:
+        """브라우저·컨텍스트만 정리합니다 (Playwright 핸들은 유지)."""
+        for closer in (self.context, self.browser):
+            if closer:
+                try:
+                    closer.close()
+                except Exception:
+                    pass
+        self.page = None
+        self.context = None
+        self.browser = None
+
+    def restart_if_needed(self) -> None:
+        """연결이 끊기면 브라우저를 다시 열고 로그인합니다."""
+        if self._is_alive():
+            return
+
+        print("[안내] 브라우저 연결이 끊겨 다시 시작합니다.", flush=True)
+        self._teardown_browser()
+        if self._p:
+            try:
+                self._p.stop()
+            except Exception:
+                pass
+            self._p = None
+
+        self._p = sync_playwright().start()
+        self.config = refresh_config_from_env(CONFIG)
+        creds = load_env_credentials(self.config["login_url"])
+        self.browser, self.context = create_context(
+            self._p, self.config, state_file=self.state_file
+        )
+        self.page = self.context.new_page()
+        self.config = ensure_login_only(
+            self.page,
+            self.context,
+            self.config,
+            creds,
+            state_file=self.state_file,
+        )
+
     def save_state(self) -> None:
         """현재 쿠키·세션을 파일에 저장합니다."""
-        if self.context:
+        if not self._is_alive() or not self.context:
+            return
+        try:
             self.context.storage_state(path=str(self.state_file))
+        except Exception:
+            pass
 
     def ensure_logged_in(self, config: Optional[Dict] = None) -> Dict:
         """작업 전 로그인·세션 만료 여부를 다시 확인합니다.
 
         이미 업무 화면에 있으면 login_url로 이동하지 않습니다 (화면이 튕기는 현상 방지).
         """
+        self.restart_if_needed()
         if not self.page or not self.context or self.config is None:
             raise RuntimeError("브라우저 세션이 시작되지 않았습니다.")
 
@@ -133,12 +188,16 @@ class BrowserSession:
 
     def prepare_for_task(self) -> None:
         """메인 탭 외 추가 탭을 닫아 다음 작업을 준비합니다."""
+        self.restart_if_needed()
         if not self.context:
             return
 
         if self.page is None or self.page.is_closed():
             live_pages = [p for p in self.context.pages if not p.is_closed()]
-            self.page = live_pages[0] if live_pages else self.context.new_page()
+            if live_pages:
+                self.page = live_pages[0]
+            else:
+                self.page = self.context.new_page()
 
         main = self.page
         for extra in list(self.context.pages):
@@ -160,16 +219,7 @@ class BrowserSession:
             self.save_state()
         except Exception:
             pass
-        if self.context:
-            try:
-                self.context.close()
-            except Exception:
-                pass
-        if self.browser:
-            try:
-                self.browser.close()
-            except Exception:
-                pass
+        self._teardown_browser()
         if self._p:
             try:
                 self._p.stop()

@@ -12,6 +12,7 @@ from Mate2QA_login import (
     load_env_credentials,
 )
 from Mate2QA_order_search import click_select_all_orders, wait_search_grid
+from Mate2QA_shipper_select import PAGE_READY_WM_OUT_EXPECT, select_shipper_on_page
 from Mate2QA_site_config import (
     CONFIG as _SITE_CONFIG,
     STATE_FILE_DOMESTIC,
@@ -19,10 +20,6 @@ from Mate2QA_site_config import (
     refresh_config_from_env,
 )
 
-# 출고예정 목록 URL
-DEFAULT_OUT_EXPECT_LIST_URL = (
-    "https://qa-style.ourbox.co.kr/wm/out/reg/outExpectList.do"
-)
 # 출고상태: 출고보류
 OUT_STATE_HOLD = "99"
 # 검색조건: 쇼핑몰 주문번호 / 검색어
@@ -31,7 +28,9 @@ DEFAULT_SEARCH_TEXT = "J"
 
 CONFIG = {
     **_SITE_CONFIG,
-    "out_expect_list_url": DEFAULT_OUT_EXPECT_LIST_URL,
+    "shipper_label": "",
+    "shipper_label_ably_default": "아이니",
+    "shipper_label_default": "",
 }
 
 STATE_FILE = STATE_FILE_DOMESTIC
@@ -50,19 +49,13 @@ SEARCH_BTN_CANDIDATES = [
 ]
 
 
-def resolve_out_expect_list_url(config: Dict) -> str:
-    """출고예정 목록 URL을 반환합니다."""
-    return (
-        (config.get("out_expect_list_url") or "").strip()
-        or DEFAULT_OUT_EXPECT_LIST_URL
-    )
-
-
 def goto_out_expect_list(page, config: Dict) -> None:
-    """WMS 출고예정 목록 화면으로 이동합니다."""
-    target_url = resolve_out_expect_list_url(config)
-    page.goto(target_url, wait_until="domcontentloaded")
+    """WMS 출고예정 목록으로 이동한 뒤 화주·검색 폼이 준비될 때까지 대기합니다."""
+    page.goto(config["out_expect_list_url"], wait_until="domcontentloaded")
     page.wait_for_timeout(1000)
+    select_shipper_on_page(
+        page, config, page_ready_selectors=PAGE_READY_WM_OUT_EXPECT
+    )
     page.locator(OUT_STATE_SELECT).first.wait_for(state="visible", timeout=15_000)
     page.locator("#searchForm").first.wait_for(state="visible", timeout=15_000)
 

@@ -9,7 +9,12 @@ from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from Mate2QA_login import first_visible_locator
 from Mate2QA_order_search import capture_selected_order_snos, click_select_all_orders
-from Mate2QA_order_step import click_popup_ok_if_visible
+from Mate2QA_order_step import (
+    OutWkOrdProcessingError,
+    click_popup_ok_if_visible,
+    get_abort_popup_messages,
+    wait_out_wk_ord_popups_after_next_step,
+)
 
 from Mate2QA_site_config import SEARCH_FILTER_WM_WAVE_FILE
 
@@ -30,6 +35,21 @@ def print_out_alloc_rgst_no_results() -> None:
     print(f"[안내] {MSG_OUT_ALLOC_RGST_NO_RESULTS}", flush=True)
 
 
+MSG_OUT_WK_ORD_NO_RESULTS = (
+    "출고작업 목록에서 검색 결과를 찾지 못했습니다. "
+    "출고차수명·할당 상태를 확인해 주세요."
+)
+
+
+class OutWkOrdSearchEmptyError(Exception):
+    """출고작업(outWkOrdList) 화면에서 검색 결과 행이 없을 때."""
+
+
+def print_out_wk_ord_no_results() -> None:
+    """출고작업 목록 검색 결과 없음 안내를 출력합니다."""
+    print(f"[경고] {MSG_OUT_WK_ORD_NO_RESULTS}", flush=True)
+
+
 DEFAULT_WAVE_PROCESS: Dict[str, str] = {
     "id": "selBoxPackBtn",
     "data_type": "boxPack",
@@ -37,7 +57,11 @@ DEFAULT_WAVE_PROCESS: Dict[str, str] = {
     "label": "화주 합포장 기준",
 }
 
-WAVE_PROCESS_WAIT_MS = 2000
+WAVE_PROCESS_WAIT_MS = 3000
+
+TOTAL_GROUP_BOX_MODAL = "#totalGroupBoxModal.show, #totalGroupBoxModal.in"
+BOX_RECOMMEND_ALERT_POLL_MS = 150
+BOX_RECOMMEND_ALERT_CLICK_MS = 200
 
 # 단계별 alert OK 자동 클릭 설정입니다.
 # True: alert OK 자동 클릭, False: 화면에 남겨두고 사용자가 직접 확인
@@ -123,6 +147,23 @@ def load_out_tseq_nm() -> Optional[str]:
     return value or None
 
 
+def read_out_tseq_nm_on_alloc_page(page: Page) -> str:
+    """출고차수할당 화면 #out_tseq_nm 현재 값을 읽습니다 (사용자 수정 반영)."""
+    loc = page.locator('#out_tseq_nm, input[name="out_tseq_nm"]').first
+    loc.wait_for(state="visible", timeout=10_000)
+    return (loc.input_value() or "").strip()
+
+
+def capture_out_tseq_nm_from_alloc_page(page: Page) -> str:
+    """할당 화면의 출고차수명을 읽어 JSON에 저장한 뒤 반환합니다."""
+    value = read_out_tseq_nm_on_alloc_page(page)
+    if value:
+        data = load_wm_wave_filter() or {}
+        data["out_tseq_nm"] = value
+        save_wm_wave_filter(data)
+    return value
+
+
 # JSON 저장 시 이전 값을 유지할 필드 (출고예정 캡처 등으로 덮어쓰기 방지)
 _PRESERVED_FILTER_KEYS = (
     "out_tseq_nm",
@@ -151,15 +192,22 @@ def _handle_alert_ok_by_policy(
     required: bool = False,
 ) -> bool:
     """단계별 설정에 따라 alert OK를 자동 클릭하거나 수동 확인으로 남깁니다."""
-    if not ALERT_OK_POLICY.get(policy_key, False):
+    auto_click = ALERT_OK_POLICY.get(policy_key, False)
+    watch_abort = bool(get_abort_popup_messages())
+    if not auto_click and not watch_abort:
         return False
 
     clicked = False
     for attempt in range(1, max_attempts + 1):
         wait_ms = timeout_ms if attempt == 1 else min(timeout_ms, 3000)
-        if not click_popup_ok_if_visible(page, wait_ms):
-            break
+        try:
+            if not click_popup_ok_if_visible(page, wait_ms):
+                break
+        except OutWkOrdProcessingError:
+            raise
         clicked = True
+        if watch_abort and not auto_click:
+            break
 
     if required and not clicked:
         raise ValueError(f"{label} alert에서 OK 버튼을 찾지 못했습니다.")
@@ -327,7 +375,10 @@ def ensure_alloc_rgst_has_search_results(
 
 
 def select_orders_by_od_sno(page: Page, od_snos: List[str]) -> None:
-    """검색 결과 그리드에서 저장된 od_sno와 일치하는 행 체크박스를 선택합니다."""
+    """검색 결과 그리드에서 저장된 od_sno와 일치하는 행 체크박스를 선택합니다.
+
+    웨이브 목록에 없는 od_sno(수량 불일치 등)는 경고만 출력하고, 찾은 건만 선택합니다.
+    """
     targets = [str(s).strip() for s in od_snos if str(s).strip()]
     if not targets:
         raise ValueError("선택할 od_sno 목록이 비어 있습니다.")
@@ -364,9 +415,10 @@ def select_orders_by_od_sno(page: Page, od_snos: List[str]) -> None:
     found = result.get("found") or []
     missing = result.get("missing") or []
     if missing:
-        raise ValueError(
-            f"웨이브 목록에서 od_sno {len(missing)}건을 찾지 못했습니다: "
-            f"{';'.join(missing)}"
+        print(
+            f"[경고] 웨이브 목록에서 od_sno {len(missing)}건을 찾지 못했습니다: "
+            f"{';'.join(missing)}",
+            flush=True,
         )
 
 
@@ -580,7 +632,7 @@ def run_wave_process_on_expect_list(
     *,
     wait_ms: int = WAVE_PROCESS_WAIT_MS,
 ) -> Dict[str, Any]:
-    """출고예정: WAVE 클릭 후 2초 대기, 사용자 미선택 시에만 화주 합포장 기준 자동 클릭."""
+    """출고예정: WAVE 클릭 후 3초 대기, 사용자 미선택 시에만 화주 합포장 기준 자동 클릭."""
     wave_btn = page.locator("#doWavePorc").first
     wave_btn.wait_for(state="visible", timeout=10_000)
     wave_btn.click()
@@ -600,7 +652,7 @@ def run_wave_process_on_expect_list(
         box_btn = page.locator("#selBoxPackBtn").first
         if not box_btn.is_visible():
             raise ValueError(
-                "2초 대기 후에도 WAVE 선택이 없고 #selBoxPackBtn이 보이지 않습니다. "
+                "3초 대기 후에도 WAVE 선택이 없고 #selBoxPackBtn이 보이지 않습니다. "
                 "팝업 상태를 확인해 주세요."
             )
         box_btn.click()
@@ -769,9 +821,12 @@ def click_out_wk_ord_search_button(page: Page) -> None:
 
 def wait_out_wk_ord_main_grid(page: Page, timeout_ms: int = 30_000) -> None:
     """출고작업 목록(#grid-table) 그리드 행이 보일 때까지 대기합니다."""
-    page.locator("#grid-table .tabulator-row").first.wait_for(
-        state="visible", timeout=timeout_ms
-    )
+    try:
+        page.locator("#grid-table .tabulator-row").first.wait_for(
+            state="visible", timeout=timeout_ms
+        )
+    except PlaywrightTimeoutError as exc:
+        raise OutWkOrdSearchEmptyError(MSG_OUT_WK_ORD_NO_RESULTS) from exc
 
 
 def search_out_wk_ord_by_tseq_nm(page: Page, out_tseq_nm: str) -> None:
@@ -910,46 +965,82 @@ def click_total_box_recommend_btn(page: Page) -> None:
     menu = page.locator("#totalBoxRecommendBtn").first
     menu.wait_for(state="visible", timeout=10_000)
     menu.click()
-    page.wait_for_timeout(800)
+    page.wait_for_timeout(300)
 
 
-def click_total_box_recommend(page: Page) -> None:
-    """박스추천 메뉴 「전체박스 추천 실행」 클릭 후 모달·alert까지 처리합니다."""
-    click_total_box_recommend_btn(page)
+def _is_group_box_modal_visible(page: Page) -> bool:
+    """그룹 박스 선택 모달이 보이는지 확인합니다."""
+    modal = page.locator(TOTAL_GROUP_BOX_MODAL).first
+    return modal.count() > 0 and modal.is_visible()
 
-    modal = page.locator("#totalGroupBoxModal.show, #totalGroupBoxModal.in").first
-    try:
-        modal.wait_for(state="visible", timeout=10_000)
-    except PlaywrightTimeoutError:
-        _handle_alert_ok_by_policy(
-            page,
-            "box_recommend",
-            "박스추천",
-            timeout_ms=5000,
-        )
-        return
 
+def _click_group_box_modal_confirm(page: Page) -> bool:
+    """그룹 박스 선택 모달의 확인 버튼을 클릭합니다."""
+    if not _is_group_box_modal_visible(page):
+        return False
     confirm = page.locator("#totalGroupBoxConfirmBtn").first
-    confirm.wait_for(state="visible", timeout=10_000)
+    if confirm.count() == 0 or not confirm.is_visible():
+        return False
     confirm.click()
-    page.wait_for_timeout(800)
-    _handle_alert_ok_by_policy(
-        page,
-        "box_recommend",
-        "박스추천",
-        timeout_ms=15_000,
-        max_attempts=2,
-    )
+    page.wait_for_timeout(300)
+    return True
 
+
+def _close_group_box_modal_if_open(page: Page) -> None:
+    """열려 있는 그룹 박스 선택 모달을 닫습니다."""
+    if not _is_group_box_modal_visible(page):
+        return
     try:
-        modal.wait_for(state="hidden", timeout=15_000)
+        page.locator(TOTAL_GROUP_BOX_MODAL).first.wait_for(state="hidden", timeout=5_000)
     except PlaywrightTimeoutError:
         close_btn = page.locator(
             '#totalGroupBoxModal button:has-text("닫기"), #totalGroupBoxModal .close'
         ).first
         if close_btn.count() and close_btn.is_visible():
             close_btn.click()
-            page.wait_for_timeout(500)
+            page.wait_for_timeout(300)
+
+
+def _handle_box_recommend_alerts(page: Page, *, max_wait_ms: int = 20_000) -> None:
+    """박스추천 확인·완료 alert와 그룹 박스 모달을 빠르게 처리합니다."""
+    deadline = time.monotonic() + max_wait_ms / 1000
+    actions = 0
+    last_action_at = 0.0
+    quiet_after_ms = 2500
+
+    while time.monotonic() < deadline:
+        acted = False
+        try:
+            if click_popup_ok_if_visible(
+                page,
+                timeout_ms=BOX_RECOMMEND_ALERT_CLICK_MS,
+                settle_ms=250,
+                poll_ms=BOX_RECOMMEND_ALERT_POLL_MS,
+            ):
+                acted = True
+        except OutWkOrdProcessingError:
+            raise
+
+        if not acted and _click_group_box_modal_confirm(page):
+            acted = True
+
+        if acted:
+            actions += 1
+            last_action_at = time.monotonic()
+            continue
+
+        if actions > 0 and (time.monotonic() - last_action_at) * 1000 >= quiet_after_ms:
+            break
+
+        page.wait_for_timeout(BOX_RECOMMEND_ALERT_POLL_MS)
+
+    _close_group_box_modal_if_open(page)
+
+
+def click_total_box_recommend(page: Page) -> None:
+    """박스추천 메뉴 「전체박스 추천 실행」 클릭 후 모달·alert까지 처리합니다."""
+    click_total_box_recommend_btn(page)
+    _handle_box_recommend_alerts(page)
 
 
 def click_out_wk_ord_next_step_dropdown(page: Page) -> None:
@@ -967,18 +1058,12 @@ def click_out_wk_ord_next_step_dropdown(page: Page) -> None:
 
 
 def click_all_picking_instrt(page: Page) -> None:
-    """다음 단계 메뉴 「전체 다음단계」(#all_picking_instrt)를 클릭 후 정책에 따라 alert OK 처리."""
+    """다음 단계 메뉴 「전체 다음단계」(#all_picking_instrt)를 클릭 후 alert를 처리합니다."""
     menu = page.locator("#all_picking_instrt").first
     menu.wait_for(state="visible", timeout=10_000)
     menu.click()
     page.wait_for_timeout(800)
-    _handle_alert_ok_by_policy(
-        page,
-        "all_picking_instrt",
-        "전체 다음단계",
-        timeout_ms=15_000,
-        max_attempts=3,
-    )
+    wait_out_wk_ord_popups_after_next_step(page)
 
 
 def run_out_wk_ord_box_recommend_and_next_step(page: Page) -> None:

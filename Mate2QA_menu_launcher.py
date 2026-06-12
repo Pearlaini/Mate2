@@ -9,9 +9,15 @@ from typing import Optional
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from Mate2QA_browser_session import BrowserSession
+from Mate2QA_order_step import (
+    OutWkOrdProcessingError,
+    print_out_wk_ord_processing_error,
+)
 from Mate2QA_wm_wave_search import (
     OutAllocRgstSearchEmptyError,
+    OutWkOrdSearchEmptyError,
     print_out_alloc_rgst_no_results,
+    print_out_wk_ord_no_results,
 )
 from Mate2QA_shipper_select import (
     change_session_shipper_on_page,
@@ -55,6 +61,7 @@ def _fetch_session_shipper_label(session: Optional[BrowserSession]) -> str:
     config = _shipper_display_config()
     if session and session.page:
         try:
+            session.restart_if_needed()
             session.ensure_logged_in(config)
             label = (
                 probe_session_shipper_label(config, page=session.page) or ""
@@ -139,6 +146,15 @@ def run_task_module(module_name: str, session: BrowserSession) -> None:
         run_fn(session.page, session.context, config, keep_browser=True)
     except OutAllocRgstSearchEmptyError:
         print_out_alloc_rgst_no_results()
+    except OutWkOrdSearchEmptyError:
+        print_out_wk_ord_no_results()
+    except OutWkOrdProcessingError as exc:
+        print_out_wk_ord_processing_error(exc)
+        print(
+            "[안내] 메뉴로 돌아갑니다. 브라우저는 유지됩니다. "
+            "다른 번호를 선택해 주세요.",
+            flush=True,
+        )
     except PlaywrightTimeoutError as exc:
         page_url = (session.page.url if session.page else "").lower()
         if "grid-table-tab3" in str(exc):
@@ -177,7 +193,6 @@ def main() -> None:
                         change_session_shipper_on_page(session.page, config) or ""
                     ).strip() or None
                     session.save_state()
-                    print("[안내] 메뉴로 돌아갑니다. 변경된 화주가 배너에 표시됩니다.")
                 except KeyboardInterrupt:
                     pass
                 except Exception as exc:

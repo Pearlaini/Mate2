@@ -54,9 +54,9 @@ def run_task(page, context, config, *, keep_browser: bool = False):
     wait_enter_after_task(
         keep_browser=keep_browser,
         message=(
-            "OK 확인 후 Enter를 누르세요."
+            "OK를 화면에서 누른 뒤 Enter를 누르세요."
             if keep_browser
-            else "OK 확인 후 Enter를 누르시면 팝업창이 닫힙니다."
+            else "OK를 화면에서 누른 뒤 Enter를 누르시면 팝업창이 닫힙니다."
         ),
     )
 

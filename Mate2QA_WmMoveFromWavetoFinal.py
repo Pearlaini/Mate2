@@ -15,7 +15,12 @@ from Mate2QA_login import (
     ensure_login_only,
     load_env_credentials,
 )
-from Mate2QA_order_step import OUT_WK_ORD_PROCESSING_ERROR, abort_popup_on_messages
+from Mate2QA_order_step import (
+    OUT_WK_ORD_PROCESSING_ERROR,
+    OutWkOrdProcessingError,
+    abort_popup_on_messages,
+    print_out_wk_ord_processing_error,
+)
 from Mate2QA_site_config import CONFIG, STATE_FILE_DOMESTIC, print_site_url_banner, refresh_config_from_env
 from Mate2QA_WmMoveFromBoxtoFinal import (
     click_alert_ok_before_picking_tab,
@@ -183,6 +188,8 @@ def run() -> None:
 
     try:
         run_with_browser(run_task, config=CONFIG, state_file=STATE_FILE)
+    except OutWkOrdProcessingError as exc:
+        print_out_wk_ord_processing_error(exc)
     except PlaywrightTimeoutError as exc:
         if "grid-table-tab3" in str(exc):
             return

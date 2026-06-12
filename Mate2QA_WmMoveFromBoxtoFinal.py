@@ -20,8 +20,11 @@ from Mate2QA_login import (
 )
 from Mate2QA_order_step import (
     OUT_WK_ORD_PROCESSING_ERROR,
+    OutWkOrdProcessingError,
     abort_popup_on_messages,
     click_popup_ok_if_visible,
+    print_out_wk_ord_processing_error,
+    wait_out_wk_ord_popups_after_next_step,
 )
 from Mate2QA_order_search import click_search_button, wait_order_search_form
 from Mate2QA_site_config import (
@@ -38,13 +41,13 @@ from Mate2QA_wm_wave_search import (
     click_out_wk_ord_instruction_tab,
     click_out_wk_ord_next_step_dropdown,
     click_out_wk_ord_search_button,
+    click_total_box_recommend,
     wait_out_wk_ord_main_grid,
     wait_out_wk_ord_tab4_rows,
 )
 
 STATE_FILE = STATE_FILE_DOMESTIC
 ORDER_MANAGE_LIST_PATH = "/om/order/manage/manageList.do"
-TOTAL_GROUP_BOX_MODAL = "#totalGroupBoxModal.show, #totalGroupBoxModal.in"
 
 
 def goto_out_wk_ord_list(page: Page, config: Dict) -> None:
@@ -134,148 +137,6 @@ def click_out_wk_ord_row_by_sno(page: Page, out_tseq_sno: str) -> None:
     tseq_sno = str(result.get("tseq_sno") or target).strip()
 
 
-def _dismiss_box_recommend_alerts(page: Page, *, max_attempts: int = 2) -> None:
-    """박스추천 완료 alert OK를 최대 max_attempts회까지 클릭합니다."""
-    for attempt in range(1, max_attempts + 1):
-        timeout_ms = 15_000 if attempt == 1 else 5_000
-        if not click_popup_ok_if_visible(page, timeout_ms=timeout_ms):
-            if attempt == 1:
-                pass
-            break
-        page.wait_for_timeout(500)
-
-
-def _select_boxes_in_group_box_modal(page: Page) -> None:
-    """박스추천 모달에서 추천 박스를 선택합니다."""
-    result = page.evaluate(
-        """() => {
-            const modal = document.querySelector('#totalGroupBoxModal');
-            if (!modal) return { selected: false, reason: 'modal_not_found' };
-
-            const isVisible = (el) => {
-                if (!el) return false;
-                const style = window.getComputedStyle(el);
-                const rect = el.getBoundingClientRect();
-                return style.display !== 'none'
-                    && style.visibility !== 'hidden'
-                    && rect.width > 0
-                    && rect.height > 0;
-            };
-
-            const radios = Array.from(
-                modal.querySelectorAll('input[type="radio"]')
-            ).filter(isVisible);
-            if (radios.length > 0) {
-                const target = radios.find((r) => !r.checked) || radios[0];
-                target.click();
-                return { selected: true, method: 'radio', count: radios.length };
-            }
-
-            const header = Array.from(
-                modal.querySelectorAll(
-                    '.tabulator-header input[type="checkbox"], '
-                    + 'div.tabulator-col-title input[type="checkbox"]'
-                )
-            ).find(isVisible);
-            if (header && !header.checked) {
-                header.click();
-                return { selected: true, method: 'header_checkbox' };
-            }
-
-            const rowCbs = Array.from(
-                modal.querySelectorAll('.tabulator-row input[type="checkbox"]')
-            ).filter(isVisible);
-            if (rowCbs.length > 0) {
-                for (const cb of rowCbs) {
-                    if (!cb.checked) cb.click();
-                }
-                const checked = rowCbs.filter((cb) => cb.checked).length;
-                return {
-                    selected: checked > 0,
-                    method: 'row_checkbox',
-                    count: rowCbs.length,
-                    checked,
-                };
-            }
-
-            const firstRow = Array.from(
-                modal.querySelectorAll('.tabulator-row')
-            ).find(isVisible);
-            if (firstRow) {
-                firstRow.click();
-                return { selected: true, method: 'row_click' };
-            }
-
-            return { selected: false, reason: 'no_selectable_element' };
-        }"""
-    )
-    if not result.get("selected"):
-        raise ValueError(
-            "박스추천 모달에서 선택 가능한 박스를 찾지 못했습니다. "
-            f"reason={result.get('reason')}"
-        )
-
-
-def _ensure_box_recommend_modal_closed(page: Page) -> None:
-    """박스추천 모달이 남아 있으면 미완료로 보고 중단합니다."""
-    modal = page.locator(TOTAL_GROUP_BOX_MODAL).first
-    if modal.count() > 0 and modal.is_visible():
-        raise ValueError(
-            "박스추천이 완료되지 않았습니다. "
-            "박스추천 모달(#totalGroupBoxModal)이 아직 열려 있습니다."
-        )
-
-
-def _close_total_group_box_modal_if_open(page: Page) -> None:
-    """열려 있는 박스추천 모달을 닫습니다."""
-    modal = page.locator(TOTAL_GROUP_BOX_MODAL).first
-    if modal.count() == 0 or not modal.is_visible():
-        return
-    try:
-        modal.wait_for(state="hidden", timeout=15_000)
-    except PlaywrightTimeoutError:
-        close_btn = page.locator(
-            '#totalGroupBoxModal button:has-text("닫기"), #totalGroupBoxModal .close'
-        ).first
-        if close_btn.count() and close_btn.is_visible():
-            close_btn.click()
-            page.wait_for_timeout(500)
-
-
-def run_total_box_recommend(page: Page) -> None:
-    """전체박스 추천 실행 — 박스 선택 팝업 유무에 따라 분기 처리합니다."""
-    menu = page.locator("#totalBoxRecommendBtn").first
-    menu.wait_for(state="visible", timeout=10_000)
-    menu.click()
-    page.wait_for_timeout(800)
-
-    modal = page.locator(TOTAL_GROUP_BOX_MODAL).first
-    try:
-        modal.wait_for(state="visible", timeout=5_000)
-    except PlaywrightTimeoutError:
-        _dismiss_box_recommend_alerts(page, max_attempts=2)
-        page.wait_for_timeout(1000)
-        return
-
-    _select_boxes_in_group_box_modal(page)
-    page.wait_for_timeout(300)
-
-    confirm = page.locator("#totalGroupBoxConfirmBtn").first
-    confirm.wait_for(state="visible", timeout=10_000)
-    confirm.click()
-    page.wait_for_timeout(800)
-
-    if click_popup_ok_if_visible(page, timeout_ms=3_000):
-        _select_boxes_in_group_box_modal(page)
-        page.wait_for_timeout(300)
-        confirm.click()
-        page.wait_for_timeout(800)
-
-    _dismiss_box_recommend_alerts(page, max_attempts=2)
-    _close_total_group_box_modal_if_open(page)
-    _ensure_box_recommend_modal_closed(page)
-
-
 @contextmanager
 def auto_ok_for_all_next_step() -> Iterator[None]:
     """이번 스크립트에서만 전체 다음단계 alert OK를 자동 클릭하도록 설정합니다."""
@@ -291,19 +152,13 @@ def run_box_recommend_and_move_next(page: Page) -> None:
     """출고지시 탭에서 박스추천 후 전체 다음단계까지 이동합니다."""
     click_box_recommend_dropdown(page)
     with abort_popup_on_messages(OUT_WK_ORD_PROCESSING_ERROR):
-        run_total_box_recommend(page)
-    _ensure_box_recommend_modal_closed(page)
+        click_total_box_recommend(page)
     page.wait_for_timeout(2000)
     with abort_popup_on_messages(OUT_WK_ORD_PROCESSING_ERROR):
         click_out_wk_ord_next_step_dropdown(page)
         with auto_ok_for_all_next_step():
             click_all_picking_instrt(page)
-        for attempt in range(1, 4):
-            timeout_ms = 10_000 if attempt == 1 else 5_000
-            if not click_popup_ok_if_visible(page, timeout_ms=timeout_ms):
-                break
-            page.wait_for_timeout(500)
-    page.wait_for_timeout(2000)
+    page.wait_for_timeout(1000)
 
 
 def click_alert_ok_before_picking_tab(page: Page) -> None:
@@ -680,7 +535,10 @@ def run() -> None:
     """로그인 → 출고지시~출고확정 (단독 실행)."""
     from Mate2QA_browser_session import run_with_browser
 
-    run_with_browser(run_task, config=CONFIG, state_file=STATE_FILE)
+    try:
+        run_with_browser(run_task, config=CONFIG, state_file=STATE_FILE)
+    except OutWkOrdProcessingError as exc:
+        print_out_wk_ord_processing_error(exc)
 
 
 if __name__ == "__main__":

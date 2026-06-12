@@ -429,13 +429,8 @@ def change_session_shipper_on_page(page, config: Dict) -> str:
     )
     after_label = read_current_shipper_label(page)
 
-    if after_label and after_label != before_label:
-        print(
-            f"[완료] 화주가 '{before_label or '선택하세요'}' → '{after_label}'(으)로 변경되었습니다.",
-            flush=True,
-        )
-    elif after_label:
-        print(f"[완료] 화주 '{after_label}'(으)로 세션을 저장했습니다.", flush=True)
+    if after_label:
+        print(f"[완료] '{after_label}'(으)로 변경되었습니다.", flush=True)
     else:
         print("[경고] 화주가 아직 '선택하세요' 상태입니다.", flush=True)
 
