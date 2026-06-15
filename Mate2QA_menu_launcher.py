@@ -7,6 +7,7 @@ import traceback
 from typing import Optional
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import Error as PlaywrightError
 
 from Mate2QA_browser_session import BrowserSession
 from Mate2QA_order_step import (
@@ -29,7 +30,8 @@ from Mate2QA_site_config import refresh_config_from_env
 _PROBE_SHIPPER_EACH_MENU = True
 
 _MENU_BODY = """
- 0  세션 화주 변경                  / 9  종료
+ 0  세션 화주 변경     /  8  항목설정 변경     /  9  종료
+
  11  추가: 국내 주문서
  12  이동: 국내 주문발주 ~ 출고준비  / 13  추가: 화주입고
 
@@ -102,6 +104,7 @@ def build_menu_text(session: Optional[BrowserSession] = None) -> str:
 _PENDING_CHOICES: frozenset[str] = frozenset()
 
 _COMMON_TASKS = {
+    "8": "Mate2QA_setItemBtn",
     "11": "Mate2QA_AddOmDomesticOrderForm",
     "12": "Mate2QA_OmMoveDomestic",
     "13": "Mate2QA_AddOmInboundForm",
@@ -209,6 +212,22 @@ def main() -> None:
                 run_task_module(module_name, session)
             except KeyboardInterrupt:
                 pass
+            except PlaywrightError as exc:
+                if "Target page, context or browser has been closed" in str(exc):
+                    print(
+                        "[경고] 브라우저 창이 닫혔습니다. "
+                        "8번 항목설정은 9로 나간 뒤 다시 실행해 주세요.",
+                        flush=True,
+                    )
+                    session.restart_if_needed()
+                else:
+                    print(f"[오류] {exc}")
+                    traceback.print_exc()
+                    session.prepare_for_task()
+                    print(
+                        "[안내] 메뉴로 돌아갑니다. 브라우저는 유지됩니다. "
+                        "다른 번호를 선택해 주세요."
+                    )
             except Exception as exc:
                 print(f"[오류] {exc}")
                 traceback.print_exc()

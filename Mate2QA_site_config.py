@@ -43,6 +43,13 @@ LOGIN_PATH = "/om/login/login.do"
 ORDER_LIST_PATH = "/om/order/order/orderList.do"
 PUT_ORDER_LIST_PATH = "/om/order/putOrder/putOrderList.do"
 OUT_READY_LIST_PATH = "/om/order/outReady/outReadyList.do"
+OUT_HOLD_LIST_PATH = "/om/order/outHold/outHoldList.do"
+SHIP_READY_LIST_PATH = "/om/order/shipReady/shipReadyList.do"
+SHIP_WAIT_LIST_PATH = "/om/order/shipWait/shipWaitList.do"
+SHIPPING_LIST_PATH = "/om/order/shipping/shippingList.do"
+DLVR_COMPT_LIST_PATH = "/om/order/dlvrCompt/dlvrComptList.do"
+# 통합관리 — 판매관리 > 통합관리 (메뉴: orderMoveTab('manage','10'))
+INTG_ORDER_LIST_PATH = "/om/order/manage/manageList.do"
 ORDER_REGISTER_PATH = "/om/order/order/orderRgst.do"
 OUT_EXPECT_LIST_PATH = "/wm/out/reg/outExpectList.do"
 OUT_WAVE_LIST_PATH = "/wm/out/wave/outWaveList.do"
@@ -135,6 +142,36 @@ def get_out_ready_list_url(login_url: str = LOGIN_URL) -> str:
     return join_origin_path(login_url, OUT_READY_LIST_PATH)
 
 
+def get_out_hold_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, OUT_HOLD_LIST_PATH)
+
+
+def get_ship_ready_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, SHIP_READY_LIST_PATH)
+
+
+def get_ship_wait_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, SHIP_WAIT_LIST_PATH)
+
+
+def get_shipping_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, SHIPPING_LIST_PATH)
+
+
+def get_dlvr_compt_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, DLVR_COMPT_LIST_PATH)
+
+
+def get_intg_order_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, INTG_ORDER_LIST_PATH)
+
+
 def get_order_register_url(login_url: str = LOGIN_URL) -> str:
 
     return join_origin_path(login_url, ORDER_REGISTER_PATH)
@@ -191,6 +228,18 @@ def build_playwright_config(login_url: Optional[str] = None) -> Dict:
 
         "out_ready_list_url": get_out_ready_list_url(resolved_login),
 
+        "out_hold_list_url": get_out_hold_list_url(resolved_login),
+
+        "ship_ready_list_url": get_ship_ready_list_url(resolved_login),
+
+        "ship_wait_list_url": get_ship_wait_list_url(resolved_login),
+
+        "shipping_list_url": get_shipping_list_url(resolved_login),
+
+        "dlvr_compt_list_url": get_dlvr_compt_list_url(resolved_login),
+
+        "intg_order_list_url": get_intg_order_list_url(resolved_login),
+
         "order_register_url": get_order_register_url(resolved_login),
 
         "out_expect_list_url": get_out_expect_list_url(resolved_login),
@@ -220,10 +269,10 @@ def build_playwright_config(login_url: Optional[str] = None) -> Dict:
 
         "viewport_height": 1080,
 
-        # 브라우저 창: 최대화 + 페이지 줌(0.8 = 80%, 화면 잘림 완화)
+        # 브라우저 창: 최대화 + 페이지 줌(0.9 = 90%, 화면 잘림 완화)
         "start_maximized": True,
 
-        "page_zoom": 0.8,
+        "page_zoom": 0.9,
 
         # 주소/모달 팝업 구간만 1.0 (팝업 클릭·backdrop 오류 방지)
         "page_zoom_popup": 1.0,

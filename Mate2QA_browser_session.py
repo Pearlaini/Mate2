@@ -123,8 +123,14 @@ class BrowserSession:
         self.browser = None
 
     def restart_if_needed(self) -> None:
-        """연결이 끊기면 브라우저를 다시 열고 로그인합니다."""
+        """연결이 끊기거나 탭이 없으면 브라우저를 다시 열고 로그인합니다."""
         if self._is_alive():
+            if (
+                self.page is None
+                or self.page.is_closed()
+                or not any(not p.is_closed() for p in self.context.pages)
+            ):
+                self.prepare_for_task()
             return
 
         print("[안내] 브라우저 연결이 끊겨 다시 시작합니다.", flush=True)
