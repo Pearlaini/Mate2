@@ -1,11 +1,13 @@
-# Mate2QA — 항목설정(#setItemBtn) JSON 기억·화면별 적용 (런처 8번)
+﻿# Mate2QA — 항목설정(#setItemBtn) JSON 기억·화면별 적용 (런처 7번 → 서브 11)
 #
-# 실행: python Mate2QA_setItemBtn.py
+# 실행: python -m item_settings.Mate2QA_setItemBtn
 # 사이트 URL: Mate2QA_site_config.py (또는 Mate2QA_login.env)
 
-import jsonimport time
+import json
+import time
 from pathlib import Path
 from typing import Any, Dict, List
+from urllib.parse import urlparse
 
 from playwright.sync_api import (
     BrowserContext,
@@ -14,16 +16,30 @@ from playwright.sync_api import (
 )
 
 from Mate2QA_login import first_visible_locator
+from Mate2QA_menu_nav import (
+    LauncherExit,
+    MAIN_MENU_EXIT,
+    SUBMENU_BACK,
+    submenu_nav_footer,
+)
 from Mate2QA_site_config import (
     CONFIG as _SITE_CONFIG,
     PROJECT_DIR,
     STATE_FILE_DOMESTIC,
+    join_origin_path,
     refresh_config_from_env,
 )
 
-SETTINGS_FILE = PROJECT_DIR / "grid_item_settings.json"
+SETTINGS_FILE_DOMESTIC = PROJECT_DIR / "grid_item_settings.json"
+SETTINGS_FILE_OVERSEAS = PROJECT_DIR / "grid_item_settings_overseas.json"
+SCOPE_DOMESTIC = "domestic"
+SCOPE_OVERSEAS = "overseas"
 
-CONFIG = {**_SITE_CONFIG}
+CONFIG = {
+    **_SITE_CONFIG,
+    "item_settings_scope": SCOPE_DOMESTIC,
+    "item_settings_file": SETTINGS_FILE_DOMESTIC.name,
+}
 
 SET_ITEM_BTN_CANDIDATES = [
     "#setItemBtn",
@@ -38,23 +54,58 @@ SAVE_BTN_CANDIDATES = [
     'button.btn-primary:has-text("저장")',
 ]
 
-APPLY_MENU_TEXT = """
+def is_overseas_scope(config: Dict) -> bool:
+    """해외 항목설정(서브 21번) 여부를 반환합니다."""
+    return (config.get("item_settings_scope") or SCOPE_DOMESTIC).strip().lower() == SCOPE_OVERSEAS
+
+
+def resolve_settings_file(config: Dict) -> Path:
+    """CONFIG 기준 항목설정 JSON 경로를 반환합니다."""
+    raw = (config.get("item_settings_file") or SETTINGS_FILE_DOMESTIC.name).strip()
+    path = Path(raw)
+    if path.is_absolute():
+        return path
+    return PROJECT_DIR / raw
+
+
+def format_apply_menu_text(config: Dict) -> str:
+    """국내·해외 항목설정 서브메뉴 문구를 반환합니다."""
+    json_name = resolve_settings_file(config).name
+    if is_overseas_scope(config):
+        remember_label = "해외 주문발주관리"
+    else:
+        remember_label = "통합관리"
+    return f"""
 ------------------------------------------------------------
-항목설정 — 적용할 화면을 선택하세요 (JSON: grid_item_settings.json)
-m  통합관리 JSON 저장 
+항목설정 — 적용할 화면을 선택하세요 (JSON: {json_name})
+m/ㅡ  {remember_label} JSON 저장 
 a  전체 일괄적용(0 ~ 8)
 0  주문발주관리       /  1  주문서처리
 2  출고준비           /  3  발송준비
 4  발송대기           /  5  배송중
 6  배송완료           /  7  통합관리
-8  출고보류           /  9  메인메뉴 복귀
+8  출고보류
+{submenu_nav_footer(back_label="상위 메뉴 복귀")}
 
 ※ 복수 선택: 123 → 1·2·3번 순서대로 적용
 ------------------------------------------------------------
 """
 
+
 def build_apply_screen_urls(config: Dict) -> Dict[int, tuple[str, str]]:
     """화면 번호 → (표시명, URL)"""
+    if is_overseas_scope(config):
+        return {
+            0: ("해외 주문발주관리", config["intl_order_list_url"]),
+            1: ("해외 주문서처리", config["intl_put_order_list_url"]),
+            2: ("해외 출고준비", config["intl_out_ready_list_url"]),
+            3: ("해외 발송준비", config["intl_ship_ready_list_url"]),
+            4: ("해외 발송대기", config["intl_ship_wait_list_url"]),
+            5: ("해외 배송중", config["intl_shipping_list_url"]),
+            6: ("해외 배송완료", config["intl_dlvr_compt_list_url"]),
+            7: ("해외 통합관리", config["intl_intg_order_list_url"]),
+            8: ("해외 출고보류", config["intl_out_hold_list_url"]),
+        }
     return {
         0: ("주문발주관리", config["order_list_url"]),
         1: ("주문서처리", config["put_order_list_url"]),
@@ -77,7 +128,7 @@ def parse_apply_selection(raw: str) -> List[int]:
         return [0]
     if text == "a":
         return list(range(0, 9))
-    if text == "m":
+    if text in {"m", "ㅡ"}:
         return []
     ids: List[int] = []
     for ch in text:
@@ -89,13 +140,15 @@ def parse_apply_selection(raw: str) -> List[int]:
     return ids
 
 
-def prompt_apply_selection() -> str:
+def prompt_apply_selection(config: Dict) -> str:
     """적용/기억 서브메뉴 입력을 받습니다."""
-    print(APPLY_MENU_TEXT, flush=True)
+    print(format_apply_menu_text(config), flush=True)
     try:
-        return input("선택 입력 (0~9 / a / m / 123): ").strip()
+        return input(
+            f"선택 입력 (0~8 / a / m(또는 ㅡ) / 123 / {SUBMENU_BACK} / {MAIN_MENU_EXIT}): "
+        ).strip()
     except EOFError:
-        return "9"
+        return SUBMENU_BACK
 
 
 def _read_board_items(page: Page, board_id: str) -> List[Dict[str, Any]]:
@@ -140,6 +193,61 @@ def open_item_settings_popup(page: Page) -> None:
     wait_item_settings_boards_ready(page)
 
 
+def wait_wm_exec_tab_item_settings_button(
+    page: Page,
+    *,
+    tab_panel: str,
+    data_code: str,
+    timeout_ms: int = 30_000,
+) -> None:
+    """출고작업(outWkOrdList) 활성 탭의 항목설정 버튼이 보일 때까지 대기합니다."""
+    panel = page.locator(
+        f"{tab_panel}.tab-pane.active.show, {tab_panel}.active.show"
+    ).first
+    panel.wait_for(state="visible", timeout=timeout_ms)
+    panel.locator(
+        f'button#setItemBtn[data-code="{data_code}"], #setItemBtn'
+    ).first.wait_for(state="visible", timeout=timeout_ms)
+    page.wait_for_timeout(500)
+
+
+def open_wm_exec_tab_item_settings_popup(
+    page: Page,
+    *,
+    tab_panel: str,
+    data_code: str,
+    screen_label: str,
+) -> None:
+    """출고작업(outWkOrdList) 활성 탭의 항목설정 팝업을 엽니다."""
+    wait_wm_exec_tab_item_settings_button(
+        page, tab_panel=tab_panel, data_code=data_code
+    )
+    panel = page.locator(
+        f"{tab_panel}.tab-pane.active.show, {tab_panel}.active.show"
+    ).first
+    btn = panel.locator(
+        f'button#setItemBtn[data-code="{data_code}"], #setItemBtn'
+    ).first
+    btn.scroll_into_view_if_needed()
+    try:
+        btn.click(timeout=5_000)
+    except PlaywrightTimeoutError:
+        btn.click(force=True)
+    pop = page.locator(SET_ITEM_POP)
+    try:
+        pop.wait_for(state="visible", timeout=8_000)
+    except PlaywrightTimeoutError:
+        btn.evaluate("el => el.click()")
+        try:
+            pop.wait_for(state="visible", timeout=15_000)
+        except PlaywrightTimeoutError as exc:
+            raise ValueError(
+                f"{screen_label} 항목설정 팝업({SET_ITEM_POP})이 열리지 않았습니다. "
+                "탭·화주·출고차수 선택을 확인해 주세요."
+            ) from exc
+    wait_item_settings_boards_ready(page)
+
+
 def wait_item_settings_boards_ready(page: Page, timeout_ms: int = 20_000) -> None:
     """항목설정 팝업의 미사용·사용 보드 항목이 로드될 때까지 대기합니다."""
     page.locator("#leftBoard").wait_for(state="attached", timeout=timeout_ms)
@@ -170,6 +278,7 @@ def close_item_settings_popup(page: Page) -> None:
         close.click()
     else:
         page.keyboard.press("Escape")
+    click_save_success_alert_ok(page, timeout_ms=3_000)
     try:
         pop.first.wait_for(state="hidden", timeout=5_000)
     except PlaywrightTimeoutError:
@@ -182,6 +291,70 @@ def wait_item_settings_popup_closed(page: Page, timeout_ms: int = 15_000) -> Non
         page.locator(SET_ITEM_POP).first.wait_for(state="hidden", timeout=timeout_ms)
     except PlaywrightTimeoutError:
         pass
+
+
+def is_item_settings_popup_visible(page: Page) -> bool:
+    """항목설정 팝업(#setItemPop) 표시 여부."""
+    pop = page.locator(SET_ITEM_POP).first
+    try:
+        return pop.count() > 0 and pop.is_visible()
+    except Exception:
+        return False
+
+
+def install_item_settings_save_listener(page: Page) -> None:
+    """팝업이 열려 있을 때 [저장] 클릭 감지 리스너를 설치합니다."""
+    if is_item_settings_popup_visible(page):
+        _install_user_save_listener(page)
+
+
+def wait_item_settings_popup_after_manual_instruction(
+    page: Page,
+    *,
+    open_wait_ms: int = 20_000,
+    assume_saved_quiet_ms: int = 3_000,
+) -> bool:
+    """
+    수동 안내 후 대기.
+    True: 팝업이 열려 있음 → [저장] 클릭 대기 계속
+    False: 저장 완료·팝업 닫힘 추정 → 재오픈 후 읽기
+    """
+    seen_open = False
+    started = time.monotonic()
+    deadline = started + open_wait_ms / 1000
+    last_msg = started
+
+    while time.monotonic() < deadline:
+        now = time.monotonic()
+        if is_item_settings_popup_visible(page):
+            wait_item_settings_boards_ready(page)
+            install_item_settings_save_listener(page)
+            return True
+
+        if seen_open:
+            click_save_success_alert_ok(page, timeout_ms=2_000)
+            return False
+
+        if now - started >= assume_saved_quiet_ms / 1000:
+            click_save_success_alert_ok(page, timeout_ms=2_000)
+            print(
+                "[안내] 저장을 완료하셨다면 저장된 설정을 읽습니다…",
+                flush=True,
+            )
+            return False
+
+        if now - last_msg >= 5:
+            print(
+                "[안내] 항목설정·저장 대기 중… "
+                "(이미 저장하셨다면 곧 자동으로 설정을 읽습니다)",
+                flush=True,
+            )
+            last_msg = now
+
+        page.wait_for_timeout(200)
+
+    click_save_success_alert_ok(page, timeout_ms=2_000)
+    return False
 
 
 def _install_user_save_listener(page: Page) -> None:
@@ -236,7 +409,9 @@ def _user_clicked_save(page: Page) -> bool:
     return bool(page.evaluate("() => !!window.__setItemUserSaved"))
 
 
-def _pull_user_saved_capture(page: Page) -> Dict[str, Any] | None:
+def _pull_user_saved_capture(
+    page: Page, *, config: Dict | None = None
+) -> Dict[str, Any] | None:
     """저장 클릭 직전 JS 스냅샷을 JSON payload로 변환합니다."""
     raw = page.evaluate(
         """() => {
@@ -248,7 +423,7 @@ def _pull_user_saved_capture(page: Page) -> Dict[str, Any] | None:
     if not raw:
         return None
     return build_settings_payload(
-        page, raw.get("unused") or [], raw.get("used") or []
+        page, raw.get("unused") or [], raw.get("used") or [], config=config
     )
 
 
@@ -328,7 +503,7 @@ def _wait_for_user_save_click(page: Page, timeout_ms: int = 600_000) -> None:
         if not pop.is_visible():
             raise ValueError(
                 "항목설정 팝업이 닫혔지만 [저장]이 눌리지 않았습니다. "
-                "다시 8번을 실행하고 [저장]을 눌러 주세요."
+                "저장된 설정을 다시 읽습니다."
             )
         page.wait_for_timeout(200)
     raise TimeoutError(
@@ -354,26 +529,58 @@ def wait_for_user_manual_save_in_popup(
     _complete_save_after_user_click(page, screen_name=screen_name)
 
 
-def wait_for_user_to_click_save(page: Page, timeout_ms: int = 600_000) -> Dict[str, Any]:
+def wait_for_user_to_click_save(
+    page: Page, timeout_ms: int = 600_000, *, config: Dict | None = None
+) -> Dict[str, Any]:
     """사용자가 [저장]을 누를 때까지 대기하고, 저장 직전 팝업 설정을 읽습니다."""
     pop = page.locator(SET_ITEM_POP).first
     if not pop.is_visible():
         raise ValueError("항목설정 팝업이 열려 있지 않습니다.")
 
+    install_item_settings_save_listener(page)
     _wait_for_user_save_click(page, timeout_ms=timeout_ms)
 
-    captured = _pull_user_saved_capture(page)
+    captured = _pull_user_saved_capture(page, config=config)
     if captured is None and pop.is_visible():
-        captured = capture_item_settings_from_popup(page)
+        captured = capture_item_settings_from_popup(page, config=config)
 
     if captured is None:
         raise ValueError(
             "저장 직후 항목설정을 읽지 못했습니다. "
-            "다시 8번을 실행해 주세요."
+            "다시 메인 7번 → 11 또는 21번 항목설정을 실행해 주세요."
         )
 
     _complete_save_after_user_click(page)
     return captured
+
+
+def capture_item_settings_after_user_popup_save(
+    page: Page,
+    *,
+    config: Dict | None = None,
+    screen_name: str = "",
+    timeout_ms: int = 600_000,
+) -> Dict[str, Any]:
+    """열린 항목설정 팝업에서 사용자가 [저장]한 뒤 설정을 캡처합니다."""
+    install_item_settings_save_listener(page)
+    label = screen_name or "항목설정"
+    print(
+        f"[안내] {label} 팝업에서 원하는 대로 수정한 뒤 [저장] 버튼을 눌러 주세요.",
+        flush=True,
+    )
+    return wait_for_user_to_click_save(
+        page, timeout_ms=timeout_ms, config=config
+    )
+
+
+def _safe_column_width(width) -> int | None:
+    """항목 width를 int로 변환합니다. 빈 값·비숫자는 None."""
+    if width is None or width == "":
+        return None
+    try:
+        return int(width)
+    except (TypeError, ValueError):
+        return None
 
 
 def _normalize_column_list(
@@ -382,53 +589,85 @@ def _normalize_column_list(
     """항목 목록에 구역별 순서(order)와 expsr_yn을 맞춥니다."""
     normalized: List[Dict[str, Any]] = []
     for idx, col in enumerate(columns, start=1):
-        width = col.get("width")
-        normalized.append(
-            {
-                "order": idx,
-                "grid_itm_sno": str(col.get("grid_itm_sno") or "").strip(),
-                "label": str(col.get("label") or "").strip(),
-                "expsr_yn": expsr_yn,
-                "width": width if width is None else int(width),
-            }
-        )
+        entry: Dict[str, Any] = {
+            "order": idx,
+            "grid_itm_sno": str(col.get("grid_itm_sno") or "").strip(),
+            "label": str(col.get("label") or "").strip(),
+            "expsr_yn": expsr_yn,
+            "width": _safe_column_width(col.get("width")),
+        }
+        labels_for_json = _labels_for_json_column(col)
+        if labels_for_json:
+            entry["labels"] = labels_for_json
+        normalized.append(entry)
     return normalized
+
+
+def url_to_relative_path(url: str) -> str:
+    """절대 URL을 사이트 상대 경로(/om/...)로 변환합니다."""
+    parsed = urlparse((url or "").strip())
+    path = parsed.path or ""
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+    if path and not path.startswith("/"):
+        path = f"/{path}"
+    return path
+
+
+def resolve_settings_url(config: Dict, url_or_path: str) -> str:
+    """JSON의 상대 경로 또는 절대 URL을 현재 로그인 호스트 기준 URL로 만듭니다."""
+    text = (url_or_path or "").strip()
+    if not text:
+        if is_overseas_scope(config):
+            return str(config.get("intl_order_list_url") or "")
+        return str(config.get("intg_order_list_url") or "")
+    parsed = urlparse(text)
+    if parsed.scheme and parsed.netloc:
+        return text
+    login_url = str(config.get("login_url") or "")
+    return join_origin_path(login_url, text)
 
 
 def build_settings_payload(
     page: Page,
     unused_raw: List[Dict[str, Any]],
     used_raw: List[Dict[str, Any]],
+    *,
+    config: Dict | None = None,
 ) -> Dict[str, Any]:
     """미사용 → 사용 순서로 구분된 JSON 구조를 만듭니다."""
+    cfg = config or CONFIG
+    default_screen = "intl_order_list" if is_overseas_scope(cfg) else "intg_manage"
     return {
-        "screen": "intg_manage",
-        "url": page.url,
+        "screen": default_screen,
+        "url": url_to_relative_path(page.url),
         "미사용": _normalize_column_list(unused_raw, expsr_yn="N"),
         "사용": _normalize_column_list(used_raw, expsr_yn="Y"),
     }
 
 
-def capture_item_settings_from_popup(page: Page) -> Dict[str, Any]:
+def capture_item_settings_from_popup(page: Page, *, config: Dict | None = None) -> Dict[str, Any]:
     """열린 항목설정 팝업에서 미사용·사용 항목을 순서대로 읽습니다."""
     unused_raw = _read_board_items(page, "leftBoard")
     used_raw = _read_board_items(page, "rightBoard")
-    return build_settings_payload(page, unused_raw, used_raw)
+    return build_settings_payload(page, unused_raw, used_raw, config=config)
 
 
-def save_item_settings(data: Dict[str, Any]) -> Path:
+def save_item_settings(data: Dict[str, Any], *, config: Dict | None = None) -> Path:
     """캡처한 항목설정을 JSON 파일로 저장합니다."""
-    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with SETTINGS_FILE.open("w", encoding="utf-8") as f:
+    settings_file = resolve_settings_file(config or CONFIG)
+    settings_file.parent.mkdir(parents=True, exist_ok=True)
+    with settings_file.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    return SETTINGS_FILE
+    return settings_file
 
 
-def load_item_settings() -> Dict[str, Any] | None:
+def load_item_settings(*, config: Dict | None = None) -> Dict[str, Any] | None:
     """저장된 항목설정 JSON을 읽습니다. 없으면 None."""
-    if not SETTINGS_FILE.exists():
+    settings_file = resolve_settings_file(config or CONFIG)
+    if not settings_file.exists():
         return None
-    with SETTINGS_FILE.open(encoding="utf-8") as f:
+    with settings_file.open(encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -439,6 +678,119 @@ def _split_settings_sections(
     if "미사용" in data or "사용" in data:
         return data.get("미사용") or [], data.get("사용") or []
     return data.get("unused_columns") or [], data.get("used_columns") or []
+
+
+def _column_identity(col: Dict[str, Any]) -> str:
+    """항목 병합용 식별자(grid_itm_sno 우선, 없으면 label 키)"""
+    sno = str(col.get("grid_itm_sno") or "").strip()
+    if sno:
+        return f"sno:{sno}"
+    return f"label:{_label_key(col.get('label', ''))}"
+
+
+def _merge_preserving_existing_columns(
+    captured: List[Dict[str, Any]], existing: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """
+    사용자 저장 캡처를 우선하되,
+    기존 JSON에만 있던 항목은 뒤에 보존해 붙입니다.
+    """
+    merged: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for col in captured:
+        ident = _column_identity(col)
+        if ident in seen:
+            continue
+        seen.add(ident)
+        merged.append(col)
+
+    for col in existing:
+        ident = _column_identity(col)
+        if ident in seen:
+            continue
+        seen.add(ident)
+        merged.append(col)
+    return merged
+
+
+def _match_fixed_column(col: Dict[str, Any], *, sno: str, label: str) -> bool:
+    """고정 선두 항목 매칭(grid_itm_sno 우선, 보조로 label 사용)"""
+    col_sno = str(col.get("grid_itm_sno") or "").strip()
+    if col_sno and col_sno == sno:
+        return True
+    return _label_key(col.get("label", "")) == _label_key(label)
+
+
+def _pin_fixed_front_used_columns(columns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    통합관리 '사용' 목록 선두를 고정합니다.
+    1: 출고 보류 사유(2540), 2: 출고 보류 사유 상세(2533)
+    """
+    fixed_specs = [
+        {"grid_itm_sno": "2540", "label": "출고 보류 사유", "width": 150},
+        {"grid_itm_sno": "2533", "label": "출고 보류 사유 상세", "width": 200},
+    ]
+    remaining = list(columns)
+    pinned: List[Dict[str, Any]] = []
+
+    for spec in fixed_specs:
+        idx = next(
+            (
+                i
+                for i, col in enumerate(remaining)
+                if _match_fixed_column(
+                    col,
+                    sno=str(spec["grid_itm_sno"]),
+                    label=str(spec["label"]),
+                )
+            ),
+            None,
+        )
+        if idx is not None:
+            col = dict(remaining.pop(idx))
+            col["grid_itm_sno"] = str(spec["grid_itm_sno"])
+            col["label"] = str(spec["label"])
+            if col.get("width") in (None, "", 0):
+                col["width"] = int(spec["width"])
+            pinned.append(col)
+            continue
+
+        pinned.append(
+            {
+                "grid_itm_sno": str(spec["grid_itm_sno"]),
+                "label": str(spec["label"]),
+                "width": int(spec["width"]),
+                "expsr_yn": "Y",
+            }
+        )
+
+    return pinned + remaining
+
+
+def merge_remember_payload_with_existing(
+    captured_data: Dict[str, Any], *, config: Dict | None = None
+) -> Dict[str, Any]:
+    """
+    m/ㅡ 저장 시 기존 JSON의 수동 추가 항목이 사라지지 않도록 병합합니다.
+    """
+    cfg = config or CONFIG
+    existing = load_item_settings(config=cfg) or {}
+    existing_unused, existing_used = _split_settings_sections(existing)
+    captured_unused, captured_used = _split_settings_sections(captured_data)
+
+    merged_unused = _merge_preserving_existing_columns(captured_unused, existing_unused)
+    merged_used = _merge_preserving_existing_columns(captured_used, existing_used)
+    if not is_overseas_scope(cfg):
+        merged_used = _pin_fixed_front_used_columns(merged_used)
+
+    default_screen = "intl_order_list" if is_overseas_scope(cfg) else "intg_manage"
+    return {
+        "screen": captured_data.get("screen") or existing.get("screen") or default_screen,
+        "url": captured_data.get("url") or existing.get("url") or "",
+        "미사용": _normalize_column_list(merged_unused, expsr_yn="N"),
+        "사용": _normalize_column_list(merged_used, expsr_yn="Y"),
+    }
 
 
 def wait_screen_ready(page: Page, timeout_ms: int = 30_000) -> None:
@@ -465,19 +817,21 @@ def click_save_in_item_settings_popup(page: Page) -> None:
 
 
 def _columns_for_apply(columns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """적용용 payload — sno·label·labels·width."""
+    """적용용 payload — sno·label·labels(원문)·width."""
     out: List[Dict[str, Any]] = []
     for col in columns:
         sno = str(col.get("grid_itm_sno") or "").strip()
-        labels = _column_label_keys(col)
-        if not sno and not labels:
+        keys = _column_label_keys(col)
+        if not sno and not keys:
             continue
         primary = _column_primary_label(col)
+        # JS findItem이 labelKey로 정규화하므로 원문 labels를 전달
+        raw_labels = _labels_for_json_column(col) or [primary]
         out.append(
             {
                 "grid_itm_sno": sno,
                 "label": primary,
-                "labels": labels,
+                "labels": raw_labels,
                 "width": col.get("width"),
             }
         )
@@ -489,15 +843,35 @@ def _label_key(label: str) -> str:
     return "".join(str(label or "").split())
 
 
+def _labels_for_json_column(col: Dict[str, Any]) -> List[str] | None:
+    """JSON 저장용 labels — label·labels 후보를 원문 그대로 반환 (1개면 생략)."""
+    seen: set[str] = set()
+    out: List[str] = []
+    for text in [str(col.get("label") or "").strip()]:
+        if text and text not in seen:
+            seen.add(text)
+            out.append(text)
+    raw = col.get("labels")
+    if isinstance(raw, list):
+        for item in raw:
+            t = str(item or "").strip()
+            if t and t not in seen:
+                seen.add(t)
+                out.append(t)
+    return out if len(out) > 1 else None
+
+
 def _column_label_keys(col: Dict[str, Any]) -> List[str]:
     """항목의 label·labels 후보를 정규화해 반환합니다 (순서 유지, 중복 제거)."""
     keys: List[str] = []
     seen: set[str] = set()
+    candidates: List[str] = []
+    primary = str(col.get("label") or "").strip()
+    if primary:
+        candidates.append(primary)
     raw = col.get("labels")
-    if isinstance(raw, list) and raw:
-        candidates = [str(x).strip() for x in raw]
-    else:
-        candidates = [str(col.get("label") or "").strip()]
+    if isinstance(raw, list):
+        candidates.extend(str(x or "").strip() for x in raw)
     for text in candidates:
         if not text:
             continue
@@ -602,10 +976,11 @@ def verify_popup_matches_json(
             )
 
     if missing:
-        raise ValueError(
-            f"{prefix}JSON 항목 {len(missing)}개를 팝업에서 찾지 못해 "
-            f"JSON과 동일하게 맞출 수 없습니다: {', '.join(missing[:10])}"
-            f"{'...' if len(missing) > 10 else ''}"
+        print(
+            f"[안내] {prefix}이 화면에 없는 항목 {len(missing)}개는 건너뛰었습니다: "
+            f"{', '.join(str(m) for m in missing[:8])}"
+            f"{'...' if len(missing) > 8 else ''}",
+            flush=True,
         )
 
 
@@ -792,10 +1167,12 @@ def apply_settings_to_screen(
 
 
 def run_remember_flow(page: Page, config: Dict, *, keep_browser: bool) -> None:
-    """통합관리에서 사용자 저장 후 JSON 기억."""
-    goto_intg_manage_list(page, config)
-    data = remember_settings_after_user_save(page)
-    save_item_settings(data)
+    """기억 대상 화면에서 사용자 저장 후 JSON 기억."""
+    goto_remember_list(page, config)
+    captured_data = remember_settings_after_user_save(page, config=config)
+    merged_data = merge_remember_payload_with_existing(captured_data, config=config)
+    path = save_item_settings(merged_data, config=config)
+    print(f"[안내] 항목설정 JSON 저장: {path}", flush=True)
 
 
 def run_apply_flow(
@@ -815,19 +1192,23 @@ def run_apply_flow(
         )
 
 
-def goto_intg_manage_list(page: Page, config: Dict) -> None:
-    """통합관리 화면으로 이동합니다."""
-    url = config["intg_order_list_url"]
+def goto_remember_list(page: Page, config: Dict) -> None:
+    """JSON 기억(m/ㅡ)용 기준 화면으로 이동합니다."""
+    if is_overseas_scope(config):
+        url = config["intl_order_list_url"]
+    else:
+        url = config["intg_order_list_url"]
     page.goto(url, wait_until="domcontentloaded")
     wait_screen_ready(page)
 
 
-def remember_settings_after_user_save(page: Page) -> Dict[str, Any]:
+def remember_settings_after_user_save(
+    page: Page, *, config: Dict | None = None
+) -> Dict[str, Any]:
     """항목설정을 열고, 사용자가 [저장]한 뒤 JSON으로 기억할 데이터를 반환합니다."""
     open_item_settings_popup(page)
     _install_user_save_listener(page)
-    data = wait_for_user_to_click_save(page)
-    return data
+    return wait_for_user_to_click_save(page, config=config)
 
 
 def ensure_working_page(page: Page, context: BrowserContext) -> Page:
@@ -849,7 +1230,7 @@ def ensure_working_page(page: Page, context: BrowserContext) -> Page:
     except Exception as exc:
         raise RuntimeError(
             "브라우저 창이 닫혔습니다. "
-            "서브메뉴 9 → 메인메뉴에서 8번을 다시 실행해 주세요."
+            "서브메뉴 9 → 메인 7번에서 항목설정(11·21)을 다시 실행해 주세요."
         ) from exc
 
 
@@ -858,16 +1239,18 @@ def run_task(page, context, config, *, keep_browser: bool = False):
     config = refresh_config_from_env(config)
     while True:
         page = ensure_working_page(page, context)
-        choice = prompt_apply_selection()
+        choice = prompt_apply_selection(config)
         lower = choice.strip().lower()
 
-        if lower == "9":
+        if lower == SUBMENU_BACK:
             return
+        if lower == MAIN_MENU_EXIT:
+            raise LauncherExit()
 
         if not choice.strip():
             continue
 
-        if lower == "m":
+        if lower in {"m", "ㅡ"}:
             run_remember_flow(page, config, keep_browser=keep_browser)
             continue
 
@@ -876,11 +1259,12 @@ def run_task(page, context, config, *, keep_browser: bool = False):
             print(f"[경고] 알 수 없는 선택입니다: {choice!r}", flush=True)
             continue
 
-        settings = load_item_settings()
+        settings = load_item_settings(config=config)
         if not settings:
+            settings_path = resolve_settings_file(config)
             raise FileNotFoundError(
-                f"설정 파일이 없습니다: {SETTINGS_FILE}\n"
-                "먼저 m(통합관리 기억)으로 JSON을 저장해 주세요."
+                f"설정 파일이 없습니다: {settings_path}\n"
+                "먼저 m 또는 ㅡ(기억)로 JSON을 저장해 주세요."
             )
 
         unused, used = _split_settings_sections(settings)

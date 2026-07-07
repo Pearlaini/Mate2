@@ -7,7 +7,11 @@ from typing import Callable, Dict, Iterator, Optional
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import (
+    Page,
+    sync_playwright,
+    TimeoutError as PlaywrightTimeoutError,
+)
 
 from Mate2QA_site_config import (
     CONFIG,
@@ -22,31 +26,83 @@ STATE_FILE = STATE_FILE_DEFAULT
 
 # 기본 로그인: qa-oms.ourbox.co.kr (ID/PW)
 # Ably 전용: qa-style.ourbox.co.kr (AblyID/AblyPW)
+# 큐텐-칸닷슈 QA: qa-kdash-om.shopeasy.co.kr (Q10ID/Q10PW)
 _ABLY_LOGIN_HOST = "qa-style.ourbox.co.kr"
+_Q10_LOGIN_HOST = "qa-kdash-om.shopeasy.co.kr"
 
+
+def _login_host(login_url: str) -> str:
+    """로그인 URL에서 호스트만 추출합니다."""
+    return urlparse(login_url.strip().lower()).netloc
 
 
 def _is_ably_login_url(login_url: str) -> bool:
     """Ably QA 사이트 로그인 URL인지 확인합니다."""
-    host = urlparse(login_url.strip().lower()).netloc
-    return host == _ABLY_LOGIN_HOST
+    return _login_host(login_url) == _ABLY_LOGIN_HOST
+
+
+def _is_q10_login_url(login_url: str) -> bool:
+    """큐텐-칸닷슈 QA 사이트 로그인 URL인지 확인합니다."""
+    return _login_host(login_url) == _Q10_LOGIN_HOST
+
+
+def _resolve_credential_keys(login_url: str) -> tuple[str, str, str]:
+    """로그인 URL에 맞는 env 키(ID, PW, 표시용 라벨)를 반환합니다."""
+    if _is_ably_login_url(login_url):
+        return "AblyID", "AblyPW", "AblyID"
+    if _is_q10_login_url(login_url):
+        return "Q10ID", "Q10PW", "Q10ID"
+    return "ID", "PW", "ID"
+
+
+def _resolve_shipper_env_key(login_url: str) -> str:
+    """로그인 URL에 맞는 화주 env 키를 반환합니다."""
+    if _is_ably_login_url(login_url):
+        return "AblySHIPPER_LABEL"
+    if _is_q10_login_url(login_url):
+        return "Q10SHIPPER_LABEL"
+    return "SHIPPER_LABEL"
+
+
+def _resolve_sach_cd_env_key(login_url: str) -> str:
+    """로그인 URL에 맞는 판매채널 value env 키를 반환합니다."""
+    if _is_ably_login_url(login_url):
+        return "AblySACH_CD_VALUE"
+    if _is_q10_login_url(login_url):
+        return "Q10SACH_CD_VALUE"
+    return "SACH_CD_VALUE"
+
+
+def _reload_login_env() -> None:
+    """Mate2QA_login.env를 다시 읽습니다."""
+    load_dotenv(_ENV_PATH, override=True)
+
+
+def load_env_shipper_label(login_url: Optional[str] = None) -> str:
+    """환경변수에서 사이트별 기본 화주명을 읽습니다. 없으면 빈 문자열."""
+    _reload_login_env()
+    resolved_url = str(login_url or _resolve_login_url()).strip()
+    key = _resolve_shipper_env_key(resolved_url)
+    return os.getenv(key, "").strip()
+
+
+def load_env_sach_cd_value(login_url: Optional[str] = None) -> str:
+    """환경변수에서 사이트별 판매채널 option value를 읽습니다. 없으면 빈 문자열."""
+    _reload_login_env()
+    resolved_url = str(login_url or _resolve_login_url()).strip()
+    key = _resolve_sach_cd_env_key(resolved_url)
+    return os.getenv(key, "").strip()
 
 
 def load_env_credentials(login_url: Optional[str] = None) -> Dict[str, str]:
     """환경변수에서 로그인 정보를 읽습니다."""
     # env 파일 값이 OS 환경변수·이전 실행 값보다 우선되도록 항상 덮어씁니다.
-    load_dotenv(_ENV_PATH, override=True)
-    load_dotenv(PROJECT_DIR / "Mate2QA_login.env", override=True)
+    _reload_login_env()
 
     # env 파일을 매번 다시 읽어, 노트북·캐시된 CONFIG와 어긋나지 않게 합니다.
     resolved_url = str(login_url or _resolve_login_url()).strip()
 
-    if _is_ably_login_url(resolved_url):
-        id_key, pw_key = "AblyID", "AblyPW"
-        account_label = "AblyID"
-    else:
-        id_key, pw_key = "ID", "PW"
-        account_label = "ID"
+    id_key, pw_key, account_label = _resolve_credential_keys(resolved_url)
 
     user_id = os.getenv(id_key, "").strip()
     user_pw = os.getenv(pw_key, "").strip()
@@ -95,6 +151,63 @@ def _build_page_zoom_init_script(zoom: float) -> str:
   }}
 }})();
 """
+
+
+def _wait_popup_navigated(popup: Page, timeout_ms: int = 20_000) -> None:
+    """about:blank에서 실제 URL로 이동할 때까지 대기합니다."""
+    try:
+        popup.wait_for_function(
+            "() => !['about:blank', ''].includes(window.location.href)",
+            timeout=timeout_ms,
+        )
+    except PlaywrightTimeoutError:
+        pass
+    try:
+        popup.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
+    except PlaywrightTimeoutError:
+        pass
+
+
+def click_opens_popup_or_same_tab(
+    page: Page,
+    locator,
+    *,
+    timeout_ms: int = 20_000,
+    register_zoom: Optional[Callable[[Page], None]] = None,
+) -> Page:
+    """
+    클릭 후 새 창이 열리면 팝업 Page를 반환하고, 같은 탭 이동이면 원래 page를 반환합니다.
+    OMS가 window.open('about:blank') 후 URL을 넣는 경우 로딩 완료까지 기다립니다.
+    """
+    pages_before = {id(p) for p in page.context.pages if not p.is_closed()}
+    popup: Optional[Page] = None
+
+    try:
+        with page.expect_popup(timeout=min(timeout_ms, 8_000)) as popup_info:
+            locator.click()
+        popup = popup_info.value
+    except PlaywrightTimeoutError:
+        locator.click()
+        page.wait_for_timeout(600)
+        new_pages = [
+            p
+            for p in page.context.pages
+            if not p.is_closed() and id(p) not in pages_before
+        ]
+        if new_pages:
+            popup = new_pages[-1]
+        else:
+            try:
+                page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
+            except PlaywrightTimeoutError:
+                pass
+            page.wait_for_timeout(800)
+            return page
+
+    if register_zoom is not None:
+        register_zoom(popup)
+    _wait_popup_navigated(popup, timeout_ms=timeout_ms)
+    return popup
 
 
 @contextmanager
@@ -305,6 +418,33 @@ def handle_duplicate_login_popup(page):
         page.wait_for_timeout(800)
 
 
+def apply_env_shipper_after_login(
+    page,
+    context,
+    config: Dict,
+    *,
+    state_file: Optional[Path] = None,
+) -> None:
+    """로그인 직후 주문목록에서 env 화주를 적용합니다 (세션 화주가 있으면 유지)."""
+    from Mate2QA_shipper_select import PAGE_READY_OM_ORDER_LIST, select_shipper_on_page
+
+    sf = state_file if state_file is not None else STATE_FILE
+    env_label = load_env_shipper_label(config.get("login_url"))
+    order_list_url = (config.get("order_list_url") or "").strip()
+    if not order_list_url:
+        return
+
+    page.goto(order_list_url, wait_until="domcontentloaded")
+    page.wait_for_timeout(500)
+    select_shipper_on_page(
+        page,
+        config,
+        page_ready_selectors=PAGE_READY_OM_ORDER_LIST,
+        target_label=env_label,
+    )
+    context.storage_state(path=str(sf))
+
+
 def ensure_login_only(
     page,
     context,
@@ -316,8 +456,9 @@ def ensure_login_only(
 ):
     """로그인 상태만 확인/보장합니다.
 
-    select_shipper=True 이면 로그인 후 화주를 선택합니다.
-    메뉴 런처·개별 작업 스크립트는 기본값(False)으로 로그인만 합니다.
+    로그인 확인 후 env에 설정된 화주를 주문목록에서 자동 적용합니다.
+    (이미 세션 화주가 선택되어 있으면 그대로 유지, env 미설정·목록 없음이면 '선택하세요' 유지)
+    select_shipper 인자는 하위 호환용이며 동작은 항상 env 기준입니다.
     """
     config = refresh_config_from_env(config)
     creds = load_env_credentials(config["login_url"])
@@ -330,12 +471,7 @@ def ensure_login_only(
         context.storage_state(path=str(sf))
 
     apply_page_zoom(page, config)
-
-    if select_shipper:
-        from Mate2QA_shipper_select import select_shipper_on_page
-
-        select_shipper_on_page(page, config)
-        context.storage_state(path=str(sf))
+    apply_env_shipper_after_login(page, context, config, state_file=sf)
 
     return config
 

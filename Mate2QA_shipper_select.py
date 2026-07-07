@@ -8,7 +8,7 @@ from playwright.sync_api import (
     TimeoutError as PlaywrightTimeoutError,
 )
 
-from Mate2QA_login import _is_ably_login_url, first_visible_locator
+from Mate2QA_login import _is_ably_login_url, first_visible_locator, load_env_shipper_label
 from Mate2QA_order_search import load_search_filter
 
 _SHIPPER_SELECT = 'select[name="pwn_header_change"]'
@@ -44,7 +44,7 @@ _SHIPPER_READ_SCRIPT = """() => {
 
 
 def resolve_shipper_label(config: Dict) -> str:
-    """화주 이름: search_filter_domestic.json → CONFIG → 사이트 기본 순으로 읽습니다."""
+    """화주 이름: JSON → CONFIG → env → 사이트 기본 순으로 읽습니다."""
     data = load_search_filter()
     if data:
         label = (data.get("shipper_label") or "").strip()
@@ -53,6 +53,9 @@ def resolve_shipper_label(config: Dict) -> str:
     configured = (config.get("shipper_label") or "").strip()
     if configured:
         return configured
+    env_label = load_env_shipper_label(config.get("login_url"))
+    if env_label:
+        return env_label
     login_url = (config.get("login_url") or "").strip()
     if login_url and _is_ably_login_url(login_url):
         return (config.get("shipper_label_ably_default") or "").strip()
@@ -318,14 +321,20 @@ def select_shipper_on_page(
     config: Dict,
     *,
     page_ready_selectors: Optional[List[str]] = None,
+    target_label: Optional[str] = None,
 ) -> None:
     """pwn_header_change에서 화주사를 선택합니다.
 
-    - 이미 다른 화주가 선택되어 있으면 그대로 유지합니다.
-    - '선택하세요'이고 설정 화주가 목록에 있으면 자동 선택합니다.
-    - '선택하세요'인데 설정 화주가 목록에 없으면 사용자에게 묻습니다.
+    - 이미 세션 화주가 선택되어 있으면 그대로 유지합니다 (C).
+    - '선택하세요'이고 target_label이 목록에 있으면 자동 선택합니다.
+    - target_label이 비어 있거나 목록에 없으면 '선택하세요'를 유지합니다 (B).
+    - target_label을 넘기지 않으면 resolve_shipper_label(config)을 사용합니다.
     """
-    target_label = resolve_shipper_label(config)
+    if target_label is None:
+        target_label = resolve_shipper_label(config)
+    else:
+        target_label = (target_label or "").strip()
+
     selector = _SHIPPER_SELECT
 
     if page.locator(selector).count() == 0:
@@ -348,31 +357,23 @@ def select_shipper_on_page(
         wait_after_shipper_change(page, page_ready_selectors=page_ready_selectors)
         return
 
+    if not target_label:
+        return
+
     selectable = _selectable_shipper_options(_get_shipper_options(page))
     if not selectable:
         raise ValueError("선택 가능한 화주 option이 없습니다.")
 
-    if target_label:
-        match = next((o for o in selectable if o["text"] == target_label), None)
-        if match:
-            _apply_shipper_value(page, match["value"])
-            wait_after_shipper_change(page, page_ready_selectors=page_ready_selectors)
-            return
-
-        picked, from_browser = _ask_user_pick_shipper(
-            page, selectable, missing_label=target_label
-        )
-    else:
-        print("[안내] shipper_label이 비어 있어 화주를 직접 선택해 주세요.", flush=True)
-        picked, from_browser = _ask_user_pick_shipper(page, selectable)
-
-    if from_browser:
+    match = next((o for o in selectable if o["text"] == target_label), None)
+    if match:
+        _apply_shipper_value(page, match["value"])
         wait_after_shipper_change(page, page_ready_selectors=page_ready_selectors)
-    else:
-        current_value, _ = _read_current_shipper(page)
-        if current_value != picked["value"]:
-            _apply_shipper_value(page, picked["value"])
-        wait_after_shipper_change(page, page_ready_selectors=page_ready_selectors)
+        return
+
+    print(
+        f"[경고] 설정 화주 '{target_label}'이(가) 목록에 없어 '선택하세요'를 유지합니다.",
+        flush=True,
+    )
 
 
 def read_session_shipper_label_on_page(page, config: Dict) -> str:

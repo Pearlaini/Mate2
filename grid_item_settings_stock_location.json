@@ -1,0 +1,126 @@
+{
+  "screen": "stock_location",
+  "url": "/wm/stock/sach/sachList.do",
+  "미사용": [],
+  "사용": [
+    {
+      "order": 1,
+      "grid_itm_sno": "2626",
+      "label": "물류센터",
+      "expsr_yn": "Y",
+      "width": 60
+    },
+    {
+      "order": 2,
+      "grid_itm_sno": "2493",
+      "label": "구역",
+      "expsr_yn": "Y",
+      "width": 60
+    },
+    {
+      "order": 3,
+      "grid_itm_sno": "2627",
+      "label": "화주",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 4,
+      "grid_itm_sno": "2667",
+      "label": "포장단위입수량",
+      "expsr_yn": "Y",
+      "width": 130
+    },
+    {
+      "order": 5,
+      "grid_itm_sno": "2484",
+      "label": "업체 품목코드",
+      "expsr_yn": "Y",
+      "width": 160
+    },
+    {
+      "order": 6,
+      "grid_itm_sno": "2486",
+      "label": "바코드",
+      "expsr_yn": "Y",
+      "width": 160
+    },
+    {
+      "order": 7,
+      "grid_itm_sno": "2482",
+      "label": "창고",
+      "expsr_yn": "Y",
+      "width": 80
+    },
+    {
+      "order": 8,
+      "grid_itm_sno": "2487",
+      "label": "제조일자",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 9,
+      "grid_itm_sno": "2488",
+      "label": "소비기한",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 10,
+      "grid_itm_sno": "2489",
+      "label": "배치번호",
+      "expsr_yn": "Y",
+      "width": 110
+    },
+    {
+      "order": 11,
+      "grid_itm_sno": "2490",
+      "label": "로트번호",
+      "expsr_yn": "Y",
+      "width": 110
+    },
+    {
+      "order": 12,
+      "grid_itm_sno": "2491",
+      "label": "입고일자",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 13,
+      "grid_itm_sno": "2495",
+      "label": "단위",
+      "expsr_yn": "Y",
+      "width": 50
+    },
+    {
+      "order": 14,
+      "grid_itm_sno": "2483",
+      "label": "상품코드",
+      "expsr_yn": "Y",
+      "width": 160
+    },
+    {
+      "order": 15,
+      "grid_itm_sno": "2485",
+      "label": "상품명",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 16,
+      "grid_itm_sno": "2492",
+      "label": "재고상태",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 17,
+      "grid_itm_sno": "2494",
+      "label": "로케이션",
+      "expsr_yn": "Y",
+      "width": 110
+    }
+  ]
+}

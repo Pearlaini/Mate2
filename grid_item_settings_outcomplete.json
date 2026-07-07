@@ -1,0 +1,546 @@
+{
+  "screen": "out_wk_ord_complete",
+  "url": "/wm/out/wk/ord/outWkOrdList.do",
+  "미사용": [],
+  "사용": [
+    {
+      "order": 1,
+      "grid_itm_sno": "3454",
+      "label": "도착국가",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 2,
+      "grid_itm_sno": "1713",
+      "label": "합포장 번호",
+      "expsr_yn": "Y",
+      "width": 160
+    },
+    {
+      "order": 3,
+      "grid_itm_sno": "2425",
+      "label": "주문일련번호",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 4,
+      "grid_itm_sno": "2426",
+      "label": "쇼핑몰 주문번호",
+      "expsr_yn": "Y",
+      "width": 160
+    },
+    {
+      "order": 5,
+      "grid_itm_sno": "1714",
+      "label": "출고번호",
+      "expsr_yn": "Y",
+      "width": 140
+    },
+    {
+      "order": 6,
+      "grid_itm_sno": "1715",
+      "label": "출고차수",
+      "expsr_yn": "Y",
+      "width": 80
+    },
+    {
+      "order": 7,
+      "grid_itm_sno": "2393",
+      "label": "설비 배치번호",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 8,
+      "grid_itm_sno": "1717",
+      "label": "출고상태",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 9,
+      "grid_itm_sno": "2408",
+      "label": "상품코드",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 10,
+      "grid_itm_sno": "1941",
+      "label": "업체 품목코드",
+      "expsr_yn": "Y",
+      "width": 120
+    },
+    {
+      "order": 11,
+      "grid_itm_sno": "1939",
+      "label": "주문 수량",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 12,
+      "grid_itm_sno": "2384",
+      "label": "박스 수량",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 13,
+      "grid_itm_sno": "1940",
+      "label": "박스 번호",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 14,
+      "grid_itm_sno": "1761",
+      "label": "송장번호",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 15,
+      "grid_itm_sno": "2390",
+      "label": "박스 명",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 16,
+      "grid_itm_sno": "1716",
+      "label": "출고요청일",
+      "expsr_yn": "Y",
+      "width": 120
+    },
+    {
+      "order": 17,
+      "grid_itm_sno": "1718",
+      "label": "출고유형",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 18,
+      "grid_itm_sno": "1720",
+      "label": "품목수",
+      "expsr_yn": "Y",
+      "width": 90
+    },
+    {
+      "order": 19,
+      "grid_itm_sno": "1721",
+      "label": "상품명",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 20,
+      "grid_itm_sno": "1759",
+      "label": "쇼핑몰 상품명",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 21,
+      "grid_itm_sno": "1724",
+      "label": "송장출력수",
+      "expsr_yn": "Y",
+      "width": 80
+    },
+    {
+      "order": 22,
+      "grid_itm_sno": "1725",
+      "label": "수취인 명",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 23,
+      "grid_itm_sno": "1726",
+      "label": "수취인우편번호",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 24,
+      "grid_itm_sno": "1727",
+      "label": "수취인주소",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 25,
+      "grid_itm_sno": "1728",
+      "label": "수취인상세주소",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 26,
+      "grid_itm_sno": "1729",
+      "label": "수취인 휴대전화번호",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 27,
+      "grid_itm_sno": "1730",
+      "label": "정제우편번호",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 28,
+      "grid_itm_sno": "1731",
+      "label": "정제주소",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 29,
+      "grid_itm_sno": "1732",
+      "label": "정제 상세 주소",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 30,
+      "grid_itm_sno": "1733",
+      "label": "배송 메세지",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 31,
+      "grid_itm_sno": "1734",
+      "label": "주문자 명",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 32,
+      "grid_itm_sno": "1735",
+      "label": "발송인상호명",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 33,
+      "grid_itm_sno": "1736",
+      "label": "발송인우편번호",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 34,
+      "grid_itm_sno": "1737",
+      "label": "발송인주소",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 35,
+      "grid_itm_sno": "1738",
+      "label": "발송인전화번호",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 36,
+      "grid_itm_sno": "1739",
+      "label": "출고등록자아이디",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 37,
+      "grid_itm_sno": "1740",
+      "label": "출고등록자명",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 38,
+      "grid_itm_sno": "1741",
+      "label": "출고 등록일",
+      "expsr_yn": "Y",
+      "width": 160
+    },
+    {
+      "order": 39,
+      "grid_itm_sno": "1742",
+      "label": "WAVE등록자아이디",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 40,
+      "grid_itm_sno": "1743",
+      "label": "WAVE등록자명",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 41,
+      "grid_itm_sno": "1744",
+      "label": "WAVE 등록일",
+      "expsr_yn": "Y",
+      "width": 160
+    },
+    {
+      "order": 42,
+      "grid_itm_sno": "1745",
+      "label": "출고지시자아이디",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 43,
+      "grid_itm_sno": "1746",
+      "label": "출고지시자명",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 44,
+      "grid_itm_sno": "1747",
+      "label": "출고 지시일",
+      "expsr_yn": "Y",
+      "width": 160
+    },
+    {
+      "order": 45,
+      "grid_itm_sno": "1748",
+      "label": "피킹지시자아이디",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 46,
+      "grid_itm_sno": "1749",
+      "label": "피킹지시자명",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 47,
+      "grid_itm_sno": "1750",
+      "label": "피킹 지시일",
+      "expsr_yn": "Y",
+      "width": 160
+    },
+    {
+      "order": 48,
+      "grid_itm_sno": "1751",
+      "label": "피킹처리자아이디",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 49,
+      "grid_itm_sno": "1752",
+      "label": "피킹처리자명",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 50,
+      "grid_itm_sno": "1753",
+      "label": "피킹처리일자",
+      "expsr_yn": "Y",
+      "width": 160
+    },
+    {
+      "order": 51,
+      "grid_itm_sno": "1754",
+      "label": "출고확정자아이디",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 52,
+      "grid_itm_sno": "1755",
+      "label": "출고확정자명",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 53,
+      "grid_itm_sno": "1756",
+      "label": "출고 확정일",
+      "expsr_yn": "Y",
+      "width": 160
+    },
+    {
+      "order": 54,
+      "grid_itm_sno": "1758",
+      "label": "판매 채널명",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 55,
+      "grid_itm_sno": "1760",
+      "label": "배송사 명",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 56,
+      "grid_itm_sno": "1762",
+      "label": "포장타입",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 57,
+      "grid_itm_sno": "1763",
+      "label": "비고",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 58,
+      "grid_itm_sno": "1764",
+      "label": "출고완료자아이디",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 59,
+      "grid_itm_sno": "1765",
+      "label": "출고완료자명",
+      "expsr_yn": "Y",
+      "width": 200
+    },
+    {
+      "order": 60,
+      "grid_itm_sno": "1766",
+      "label": "출고 완료일",
+      "expsr_yn": "Y",
+      "width": 160
+    },
+    {
+      "order": 61,
+      "grid_itm_sno": "1767",
+      "label": "배송타입",
+      "expsr_yn": "Y",
+      "width": 80
+    },
+    {
+      "order": 62,
+      "grid_itm_sno": "1878",
+      "label": "OMS 송장 전송 여부",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 63,
+      "grid_itm_sno": "1879",
+      "label": "OMS 송장 전송 일시",
+      "expsr_yn": "Y",
+      "width": 160
+    },
+    {
+      "order": 64,
+      "grid_itm_sno": "2071",
+      "label": "상품그룹",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 65,
+      "grid_itm_sno": "2072",
+      "label": "생산년도",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 66,
+      "grid_itm_sno": "2073",
+      "label": "시즌",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 67,
+      "grid_itm_sno": "2074",
+      "label": "브랜드",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 68,
+      "grid_itm_sno": "2075",
+      "label": "스타일",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 69,
+      "grid_itm_sno": "2076",
+      "label": "컬러",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 70,
+      "grid_itm_sno": "2077",
+      "label": "사이즈",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 71,
+      "grid_itm_sno": "2078",
+      "label": "SKU",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 72,
+      "grid_itm_sno": "2302",
+      "label": "검수상태",
+      "expsr_yn": "Y",
+      "width": 80
+    },
+    {
+      "order": 73,
+      "grid_itm_sno": "2303",
+      "label": "검수일시",
+      "expsr_yn": "Y",
+      "width": 160
+    },
+    {
+      "order": 74,
+      "grid_itm_sno": "1719",
+      "label": "등록구분",
+      "expsr_yn": "Y",
+      "width": 80
+    },
+    {
+      "order": 75,
+      "grid_itm_sno": "1757",
+      "label": "등록일시",
+      "expsr_yn": "Y",
+      "width": 160
+    },
+    {
+      "order": 76,
+      "grid_itm_sno": "1722",
+      "label": "화주사 명",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 77,
+      "grid_itm_sno": "1723",
+      "label": "물류센터",
+      "expsr_yn": "Y",
+      "width": 100
+    }
+  ]
+}

@@ -32,6 +32,7 @@ CONFIG = {
     "shipper_label": "",
     "address_search_keyword": "지플러스타워",
     "sach_cd_value": "SACH0020",
+    "depot_label": "계룡 물류센터",
     "target_product_search_keyword": "크래커",
 }
 
@@ -122,6 +123,54 @@ def select_sach_cd(page, option_value: str) -> None:
     )
     if not picked:
         raise ValueError("sach_cd에서 선택 가능한 판매채널이 없습니다.")
+
+
+def select_depot_cd_if_needed(page, depot_label: str = "계룡 물류센터") -> None:
+    """물류센터가 '선택하세요' 상태일 때만 지정 센터 또는 첫 번째 항목을 선택합니다."""
+    select_loc = page.locator('select[name="depot_cd"], select#depot_cd').first
+    if select_loc.count() == 0:
+        return
+
+    select_loc.wait_for(state="visible", timeout=10_000)
+    if select_loc.evaluate("(el) => !!el.disabled"):
+        return
+
+    target_label = (depot_label or "계룡 물류센터").strip()
+    picked = select_loc.evaluate(
+        """(el, label) => {
+            const placeholderLabels = new Set(['선택하세요', '선택']);
+            const currentOpt = el.options[el.selectedIndex];
+            const currentValue = (el.value || '').trim();
+            const currentText = currentOpt ? (currentOpt.textContent || '').trim() : '';
+
+            if (currentValue && !placeholderLabels.has(currentText)) {
+                return { value: currentValue, text: currentText, changed: false };
+            }
+
+            const opts = Array.from(el.options || []);
+            const selectable = opts.filter((o) => {
+                const value = (o.value || '').trim();
+                const text = (o.textContent || '').trim();
+                return !o.disabled && value && !placeholderLabels.has(text);
+            });
+            const byLabel = selectable.find((o) => (o.textContent || '').trim() === label);
+            const pick = byLabel || selectable[0];
+            if (!pick) return { value: '', text: '', changed: false };
+
+            el.value = pick.value;
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            if (window.jQuery) window.jQuery(el).val(pick.value).trigger('change');
+
+            return {
+                value: (pick.value || '').trim(),
+                text: (pick.textContent || '').trim(),
+                changed: true,
+            };
+        }""",
+        target_label,
+    )
+    if not picked.get("value"):
+        raise ValueError("depot_cd에서 선택 가능한 물류센터가 없습니다.")
 
 
 def _root_wait_ms(root: Union[Page, Frame], ms: int) -> None:
@@ -501,9 +550,9 @@ def fill_recvr_address_via_popup(page: Page, config: Dict) -> None:
         page.wait_for_timeout(300)
 
 
-def _stamp_1mddhhmm(now: datetime) -> str:
-    """월(선행 0 없음) + DDHHMM — 예: 6월 4일 14:30 → 6041430"""
-    return f"{now.month}{now.strftime('%d%H%M')}"
+def _build_contact_phone(now: datetime) -> str:
+    """주문자·수취인 연락처 — 예: 2026-06-26 → 010-2026-0626"""
+    return f"010-{now.strftime('%Y')}-{now.strftime('%m%d')}"
 
 
 def _build_recvr_detail_addr(stamp_mmddhhmm: str) -> str:
@@ -517,12 +566,12 @@ def fill_wm_manual_register_form(page, config: Dict, now: datetime) -> None:
     stamp_yymmddhhmm = now.strftime("%y%m%d%H%M")
     stamp_yyyymmddhhmm = now.strftime("%Y%m%d%H%M")
     stamp_mmddhhmm = now.strftime("%m%d%H%M")
-    stamp_1mddhhmm = _stamp_1mddhhmm(now)
-    mobile = f"010{stamp_1mddhhmm}"
+    mobile = _build_contact_phone(now)
 
 
     page.wait_for_timeout(500)
 
+    select_depot_cd_if_needed(page, config.get("depot_label", "계룡 물류센터"))
     fill_field(page, "od_user_nm", f"J주문{stamp_yymmddhhmm}")
     fill_field(page, "od_user_tel_no_enc", mobile)
     fill_field(page, "recvr_nm", f"J수취{stamp_yymmddhhmm}")

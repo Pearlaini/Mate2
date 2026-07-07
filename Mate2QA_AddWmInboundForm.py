@@ -27,8 +27,8 @@ CONFIG = {
     **_SITE_CONFIG,
     # 화주 선택 이름 (search_filter_domestic.json shipper_label이 있으면 그 값 우선)
     "shipper_label": "아이니",
-    # 물류센터 없으면 목록 첫 번째 선택
-    "depot_label": "구로센터",
+    # 물류센터가 '선택하세요' 상태이면 이 센터를 우선 선택하고, 없으면 목록 첫 번째를 선택
+    "depot_label": "계룡 물류센터",
     # 상품 없으면 목록 첫 번째 항목 자동 선택
     "item_search_column": "prod_cd",
     "item_search_keyword": "P000000000000055",
@@ -107,34 +107,52 @@ def _is_depot_selectable(page) -> bool:
     return True
 
 
-def select_depot_cd(page, depot_label: str = "구로센터") -> None:
-    """입고등록 화면에서 물류센터(depot_cd)를 선택합니다. 선택 불가면 건너뜁니다."""
+def select_depot_cd(page, depot_label: str = "계룡 물류센터") -> None:
+    """물류센터가 '선택하세요' 상태일 때만 지정 센터 또는 첫 번째 항목을 선택합니다."""
     if not _is_depot_selectable(page):
         return
 
     selector = 'select[name="depot_cd"]'
     select_loc = page.locator(selector).first
-    target_label = (depot_label or "구로센터").strip()
+    target_label = (depot_label or "계룡 물류센터").strip()
     picked = select_loc.evaluate(
         """(el, label) => {
+            const placeholderLabels = new Set(['선택하세요', '선택']);
+            const currentOpt = el.options[el.selectedIndex];
+            const currentValue = (el.value || '').trim();
+            const currentText = currentOpt ? (currentOpt.textContent || '').trim() : '';
+
+            if (currentValue && !placeholderLabels.has(currentText)) {
+                return { value: currentValue, text: currentText, changed: false };
+            }
+
             const opts = Array.from(el.options || []);
-            const byLabel = opts.find(
-                (o) => (o.textContent || '').trim() === label && o.value && o.value.trim() !== ''
+            const selectable = opts.filter(
+                (o) => {
+                    const value = (o.value || '').trim();
+                    const text = (o.textContent || '').trim();
+                    return !o.disabled && value && !placeholderLabels.has(text);
+                }
             );
-            const pick = byLabel || opts.find((o) => o.value && o.value.trim() !== '');
-            if (!pick) return { value: '', text: '', matched: false };
+
+            const byLabel = selectable.find((o) => (o.textContent || '').trim() === label);
+            const pick = byLabel || selectable[0];
+            if (!pick) return { value: '', text: '', changed: false };
+
             el.value = pick.value;
             el.dispatchEvent(new Event('change', { bubbles: true }));
+            if (window.jQuery) window.jQuery(el).val(pick.value).trigger('change');
+
             return {
-                value: pick.value,
+                value: (pick.value || '').trim(),
                 text: (pick.textContent || '').trim(),
-                matched: !!byLabel,
+                changed: true,
             };
         }""",
         target_label,
     )
     if not picked.get("value"):
-        raise ValueError("depot_cd에서 선택 가능한 option이 없습니다.")
+        raise ValueError("depot_cd에서 선택 가능한 물류센터가 없습니다.")
 
 
 def select_vendor_cd(page) -> None:

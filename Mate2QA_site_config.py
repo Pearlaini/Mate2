@@ -41,6 +41,15 @@ LOGIN_PATH = "/om/login/login.do"
 # 로그인 URL의 호스트(scheme://host) 뒤에 붙이는 경로
 
 ORDER_LIST_PATH = "/om/order/order/orderList.do"
+INTL_ORDER_LIST_PATH = "/om/intlOrder/order/orderList.do"
+INTL_PUT_ORDER_LIST_PATH = "/om/intlOrder/putOrder/putOrderList.do"
+INTL_OUT_READY_LIST_PATH = "/om/intlOrder/outReady/outReadyList.do"
+INTL_OUT_HOLD_LIST_PATH = "/om/intlOrder/outHold/outHoldList.do"
+INTL_SHIP_READY_LIST_PATH = "/om/intlOrder/shipReady/shipReadyList.do"
+INTL_SHIP_WAIT_LIST_PATH = "/om/intlOrder/shipWait/shipWaitList.do"
+INTL_SHIPPING_LIST_PATH = "/om/intlOrder/shipping/shippingList.do"
+INTL_DLVR_COMPT_LIST_PATH = "/om/intlOrder/dlvrCompt/dlvrComptList.do"
+INTL_INTG_ORDER_LIST_PATH = "/om/intlOrder/manage/manageList.do"
 PUT_ORDER_LIST_PATH = "/om/order/putOrder/putOrderList.do"
 OUT_READY_LIST_PATH = "/om/order/outReady/outReadyList.do"
 OUT_HOLD_LIST_PATH = "/om/order/outHold/outHoldList.do"
@@ -55,9 +64,13 @@ OUT_EXPECT_LIST_PATH = "/wm/out/reg/outExpectList.do"
 OUT_WAVE_LIST_PATH = "/wm/out/wave/outWaveList.do"
 OUT_ALLOC_RGST_PATH = "/wm/out/alloc/outAllocRgst.do"
 OUT_WK_ORD_LIST_PATH = "/wm/out/wk/ord/outWkOrdList.do"
+OUT_ALL_LIST_PATH = "/wm/out/outall/outallList.do"
 WM_PUT_REQ_LIST_PATH = "/wm/put/req/reqList.do"
 SACH_STOCK_LIST_PATH = "/wm/stock/sach/sachList.do"
+SACH_PROD_STOCK_LIST_PATH = "/wm/stock/sach/sachProdList.do"
+SACH_PROD_GRP_STOCK_LIST_PATH = "/wm/stock/sach/sachProdGrp.do"
 ITEM_TRNSF_LIST_PATH = "/wm/stock/trnsf/itemTrnsfList.do"
+STOCK_ADJ_LIST_PATH = "/wm/stock/adj/adjList.do"
 
 
 def join_origin_path(login_url: str, path: str) -> str:
@@ -83,8 +96,6 @@ def join_origin_path(login_url: str, path: str) -> str:
 def _resolve_login_url() -> str:
 
     load_dotenv(_ENV_PATH, override=True)
-
-    load_dotenv(PROJECT_DIR / "Mate2QA_login.env", override=True)
 
     login = os.getenv("LOGIN_URL", "").strip()
 
@@ -177,6 +188,51 @@ def get_order_register_url(login_url: str = LOGIN_URL) -> str:
     return join_origin_path(login_url, ORDER_REGISTER_PATH)
 
 
+def get_intl_order_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, INTL_ORDER_LIST_PATH)
+
+
+def get_intl_put_order_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, INTL_PUT_ORDER_LIST_PATH)
+
+
+def get_intl_out_ready_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, INTL_OUT_READY_LIST_PATH)
+
+
+def get_intl_out_hold_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, INTL_OUT_HOLD_LIST_PATH)
+
+
+def get_intl_ship_ready_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, INTL_SHIP_READY_LIST_PATH)
+
+
+def get_intl_ship_wait_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, INTL_SHIP_WAIT_LIST_PATH)
+
+
+def get_intl_shipping_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, INTL_SHIPPING_LIST_PATH)
+
+
+def get_intl_dlvr_compt_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, INTL_DLVR_COMPT_LIST_PATH)
+
+
+def get_intl_intg_order_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, INTL_INTG_ORDER_LIST_PATH)
+
+
 def get_out_expect_list_url(login_url: str = LOGIN_URL) -> str:
 
     return join_origin_path(login_url, OUT_EXPECT_LIST_PATH)
@@ -197,6 +253,11 @@ def get_out_wk_ord_list_url(login_url: str = LOGIN_URL) -> str:
     return join_origin_path(login_url, OUT_WK_ORD_LIST_PATH)
 
 
+def get_out_all_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, OUT_ALL_LIST_PATH)
+
+
 def get_wm_put_req_list_url(login_url: str = LOGIN_URL) -> str:
 
     return join_origin_path(login_url, WM_PUT_REQ_LIST_PATH)
@@ -207,9 +268,40 @@ def get_sach_stock_list_url(login_url: str = LOGIN_URL) -> str:
     return join_origin_path(login_url, SACH_STOCK_LIST_PATH)
 
 
+def get_sach_prod_stock_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, SACH_PROD_STOCK_LIST_PATH)
+
+
+def get_sach_prod_grp_stock_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, SACH_PROD_GRP_STOCK_LIST_PATH)
+
+
 def get_item_trnsf_list_url(login_url: str = LOGIN_URL) -> str:
 
     return join_origin_path(login_url, ITEM_TRNSF_LIST_PATH)
+
+
+def get_stock_adj_list_url(login_url: str = LOGIN_URL) -> str:
+
+    return join_origin_path(login_url, STOCK_ADJ_LIST_PATH)
+
+
+def _login_selectors_for_url(login_url: str) -> Dict[str, str]:
+    """사이트별 로그인 폼 셀렉터 (Ably·큐텐-칸닷슈는 loginId/password)."""
+    host = urlparse(login_url.strip().lower()).netloc
+    if host in ("qa-style.ourbox.co.kr", "qa-kdash-om.shopeasy.co.kr"):
+        return {
+            "login_id_input": 'input[name="loginId"]',
+            "login_pw_input": 'input[name="password"]',
+            "login_button": 'button:has-text("로그인")',
+        }
+    return {
+        "login_id_input": 'input[name="user_id"]',
+        "login_pw_input": 'input[name="user_pwd"]',
+        "login_button": 'button:has-text("로그인")',
+    }
 
 
 def build_playwright_config(login_url: Optional[str] = None) -> Dict:
@@ -242,6 +334,24 @@ def build_playwright_config(login_url: Optional[str] = None) -> Dict:
 
         "order_register_url": get_order_register_url(resolved_login),
 
+        "intl_order_list_url": get_intl_order_list_url(resolved_login),
+
+        "intl_put_order_list_url": get_intl_put_order_list_url(resolved_login),
+
+        "intl_out_ready_list_url": get_intl_out_ready_list_url(resolved_login),
+
+        "intl_out_hold_list_url": get_intl_out_hold_list_url(resolved_login),
+
+        "intl_ship_ready_list_url": get_intl_ship_ready_list_url(resolved_login),
+
+        "intl_ship_wait_list_url": get_intl_ship_wait_list_url(resolved_login),
+
+        "intl_shipping_list_url": get_intl_shipping_list_url(resolved_login),
+
+        "intl_dlvr_compt_list_url": get_intl_dlvr_compt_list_url(resolved_login),
+
+        "intl_intg_order_list_url": get_intl_intg_order_list_url(resolved_login),
+
         "out_expect_list_url": get_out_expect_list_url(resolved_login),
 
         "out_wave_list_url": get_out_wave_list_url(resolved_login),
@@ -250,11 +360,19 @@ def build_playwright_config(login_url: Optional[str] = None) -> Dict:
 
         "out_wk_ord_list_url": get_out_wk_ord_list_url(resolved_login),
 
+        "out_all_list_url": get_out_all_list_url(resolved_login),
+
         "wm_put_req_list_url": get_wm_put_req_list_url(resolved_login),
 
         "sach_stock_list_url": get_sach_stock_list_url(resolved_login),
 
+        "sach_prod_stock_list_url": get_sach_prod_stock_list_url(resolved_login),
+
+        "sach_prod_grp_stock_list_url": get_sach_prod_grp_stock_list_url(resolved_login),
+
         "item_trnsf_list_url": get_item_trnsf_list_url(resolved_login),
+
+        "stock_adj_list_url": get_stock_adj_list_url(resolved_login),
 
         "excel_upload_file_path": (
             os.getenv("EXCEL_UPLOAD_FILE", "").strip()
@@ -277,15 +395,7 @@ def build_playwright_config(login_url: Optional[str] = None) -> Dict:
         # 주소/모달 팝업 구간만 1.0 (팝업 클릭·backdrop 오류 방지)
         "page_zoom_popup": 1.0,
 
-        "selectors": {
-
-            "login_id_input": 'input[name="user_id"]',
-
-            "login_pw_input": 'input[name="user_pwd"]',
-
-            "login_button": 'button:has-text("로그인")',
-
-        },
+        "selectors": _login_selectors_for_url(resolved_login),
 
     }
 
@@ -297,10 +407,16 @@ CONFIG = build_playwright_config()
 
 
 def refresh_config_from_env(base: Optional[Dict] = None) -> Dict:
-    """env 파일을 다시 읽어 login_url·하위 URL을 최신으로 맞춥니다."""
+    """env 파일을 다시 읽어 login_url·하위 URL·판매채널 value를 최신으로 맞춥니다."""
+    from Mate2QA_login import load_env_sach_cd_value
+
     src = base or CONFIG
     fresh = build_playwright_config()
-    return {**src, **fresh}
+    merged = {**src, **fresh}
+    env_sach = load_env_sach_cd_value(merged.get("login_url"))
+    if env_sach:
+        merged["sach_cd_value"] = env_sach
+    return merged
 
 
 CONFIG_FILE = Path(__file__).resolve()

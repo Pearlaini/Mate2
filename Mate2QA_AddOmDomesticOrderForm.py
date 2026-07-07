@@ -7,13 +7,18 @@ from playwright.sync_api import Frame, Page, sync_playwright, TimeoutError as Pl
 
 from Mate2QA_login import (
     _is_ably_login_url,
+    click_opens_popup_or_same_tab,
     create_context,
     ensure_login_only,
     first_visible_locator,
     load_env_credentials,
     popup_page_zoom,
 )
-from Mate2QA_shipper_select import PAGE_READY_OM_ORDER_LIST, select_shipper_on_page
+from Mate2QA_shipper_select import (
+    PAGE_READY_OM_ORDER_LIST,
+    read_current_shipper_label,
+    select_shipper_on_page,
+)
 from Mate2QA_site_config import (
     CONFIG as _SITE_CONFIG,
     STATE_FILE_DOMESTIC,
@@ -65,62 +70,257 @@ def resolve_sample_product_cd(config: Dict) -> str:
     return "P000000000005754"
 
 
-def open_domestic_order_register_page(page, config: Dict):
-    """국내 주문목록으로 이동한 뒤 주문서 추가 화면으로 진입합니다."""
-    page.goto(config["order_list_url"], wait_until="domcontentloaded")
-    page.wait_for_timeout(1000)
-
-    select_shipper_on_page(
-        page, config, page_ready_selectors=PAGE_READY_OM_ORDER_LIST
+def ensure_shipper_selected_on_page(page, *, step: str = "") -> str:
+    """주문목록 등에서 화주가 선택됐는지 확인합니다. 미선택이면 판매채널 단계 전에 안내합니다."""
+    label = (read_current_shipper_label(page) or "").strip()
+    if label:
+        return label
+    where = f" ({step})" if step else ""
+    raise ValueError(
+        f"화주가 선택되지 않았습니다{where}.\n"
+        "  · 메뉴 0번(세션 화주 변경)으로 화주를 먼저 선택해 주세요.\n"
+        "  · 또는 주문목록 상단 화주 드롭다운에서 직접 선택해 주세요.\n"
+        "화주가 없으면 판매채널(sach_cd) 목록이 비어 있어 주문서 등록을 진행할 수 없습니다."
     )
 
-    add_btn_candidates = [
-        'button:has-text("주문서추가")',
-        'a:has-text("주문서추가")',
-        'button:has-text("등록")',
-        'a:has-text("등록")',
+
+def _is_domestic_order_register_page(page, register_url: str) -> bool:
+    """현재 탭이 국내 수기등록 화면인지 확인합니다."""
+    current = (page.url or "").lower()
+    if "orderrgst.do" in current:
+        return True
+    target = (register_url or "").lower()
+    return bool(target and target in current)
+
+
+def open_domestic_order_register_page(page, config: Dict) -> Page:
+    """국내 주문목록에서 화주를 확인한 뒤 수기등록 화면으로 이동합니다."""
+    register_url = (config.get("order_register_url") or "").strip()
+    if not register_url:
+        raise ValueError("order_register_url이 설정되지 않았습니다.")
+
+    on_register_page = _is_domestic_order_register_page(page, register_url)
+    if not on_register_page:
+        page.goto(config["order_list_url"], wait_until="domcontentloaded")
+        _, _ = first_visible_locator(page, PAGE_READY_OM_ORDER_LIST)
+        select_shipper_on_page(
+            page, config, page_ready_selectors=PAGE_READY_OM_ORDER_LIST
+        )
+        ensure_shipper_selected_on_page(page, step="주문목록")
+        page.goto(register_url, wait_until="domcontentloaded")
+
+    select_loc = _resolve_sach_cd_locator(page)
+    if select_loc:
+        try:
+            select_loc.wait_for(state="visible", timeout=10_000)
+        except PlaywrightTimeoutError:
+            page.wait_for_timeout(300)
+    return page
+
+
+def _resolve_sach_cd_locator(page):
+    """판매채널 select 요소를 찾습니다 (#sach_cd 우선)."""
+    for sel in ("#sach_cd", 'select[name="sach_cd"]'):
+        loc = page.locator(sel).first
+        if loc.count() > 0:
+            return loc
+    return None
+
+
+def _wait_sach_cd_options_ready(page, select_loc, *, timeout_ms: int = 15_000) -> None:
+    """판매채널 select가 보이고 선택 가능한 option이 채워질 때까지 대기합니다."""
+    handle = select_loc.element_handle(timeout=timeout_ms)
+    if handle is None:
+        raise ValueError("판매채널(sach_cd) 요소를 찾지 못했습니다.")
+    page.wait_for_function(
+        """(el) => {
+            if (!el) return false;
+            const style = window.getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden') return false;
+            const placeholders = new Set(['선택하세요', '선택']);
+            return Array.from(el.options || []).some((o) => {
+                const val = (o.value || '').trim();
+                const text = (o.textContent || '').trim();
+                return val && !o.disabled && !placeholders.has(text);
+            });
+        }""",
+        arg=handle,
+        timeout=timeout_ms,
+    )
+
+
+_SACH_CD_PLACEHOLDER_LABELS = frozenset({"선택하세요", "선택"})
+
+
+def _is_selectable_sach_option(value: str, label: str) -> bool:
+    """placeholder·빈 value 옵션은 제외합니다."""
+    val = (value or "").strip()
+    text = (label or "").strip()
+    if not val:
+        return False
+    return text not in _SACH_CD_PLACEHOLDER_LABELS
+
+
+def _list_selectable_sach_options(select_loc) -> list[dict]:
+    """선택 가능한 판매채널 option 목록을 반환합니다."""
+    raw = select_loc.evaluate(
+        """(el) => Array.from(el.options || []).map((o, index) => ({
+            index,
+            value: (o.value || '').trim(),
+            label: (o.textContent || '').trim(),
+            disabled: !!o.disabled,
+        }))"""
+    )
+    return [
+        opt
+        for opt in raw
+        if not opt.get("disabled")
+        and _is_selectable_sach_option(opt.get("value", ""), opt.get("label", ""))
     ]
-    add_btn, btn_sel = first_visible_locator(page, add_btn_candidates)
-    if add_btn:
-        add_btn.click()
-        page.wait_for_load_state("domcontentloaded")
-        page.wait_for_timeout(1200)
-        return
 
-    page.goto(config["order_register_url"], wait_until="domcontentloaded")
-    page.wait_for_timeout(1200)
-    select_shipper_on_page(
-        page, config, page_ready_selectors=PAGE_READY_OM_ORDER_LIST
+
+def _read_selected_sach_cd(select_loc) -> tuple[str, str]:
+    """현재 선택된 판매채널 (value, label)"""
+    data = select_loc.evaluate(
+        """(el) => {
+            const opt = el.options[el.selectedIndex];
+            return {
+                value: (el.value || '').trim(),
+                label: opt ? (opt.textContent || '').trim() : '',
+            };
+        }"""
     )
+    return (data.get("value") or "").strip(), (data.get("label") or "").strip()
+
+
+def _select_sach_cd_with_prefs(
+    select_loc,
+    *,
+    value: str = "",
+    label: str = "",
+    fallback_label: str = "J채널",
+) -> str:
+    """JS로 판매채널을 즉시 선택합니다. 성공 시 선택된 value, 실패 시 빈 문자열."""
+    return (select_loc.evaluate(
+        """(el, prefs) => {
+            const placeholders = new Set(['선택하세요', '선택']);
+            const isSelectable = (o) => {
+                const val = (o.value || '').trim();
+                const text = (o.textContent || '').trim();
+                return !o.disabled && val && !placeholders.has(text);
+            };
+            const apply = (opt) => {
+                if (!isSelectable(opt)) return '';
+                const val = opt.value.trim();
+                el.value = val;
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                if (window.jQuery) window.jQuery(el).val(val).trigger('change');
+                return val;
+            };
+            const opts = Array.from(el.options || []);
+            const targetValue = (prefs.value || '').trim();
+            const targetLabel = (prefs.label || '').trim();
+            const fbLabel = (prefs.fallbackLabel || '').trim();
+            if (targetValue) {
+                const byValue = opts.find((o) => o.value === targetValue);
+                if (byValue) {
+                    const picked = apply(byValue);
+                    if (picked) return picked;
+                }
+            }
+            if (targetLabel) {
+                const byLabel = opts.find(
+                    (o) => (o.textContent || '').trim() === targetLabel
+                );
+                if (byLabel) {
+                    const picked = apply(byLabel);
+                    if (picked) return picked;
+                }
+            }
+            if (fbLabel) {
+                const byFb = opts.find(
+                    (o) => (o.textContent || '').trim() === fbLabel
+                );
+                if (byFb) {
+                    const picked = apply(byFb);
+                    if (picked) return picked;
+                }
+            }
+            const firstOpt = opts.find(isSelectable);
+            return firstOpt ? apply(firstOpt) : '';
+        }""",
+        {
+            "value": (value or "").strip(),
+            "label": (label or "").strip(),
+            "fallbackLabel": (fallback_label or "").strip(),
+        },
+    ) or "").strip()
+
+
+def _apply_sach_cd_selection(select_loc, *, value: str = "", label: str = "", index: int | None = None) -> bool:
+    """Playwright select_option 폴백 (select2 등 JS 선택이 실패할 때만 사용)."""
+    try:
+        if index is not None:
+            select_loc.select_option(index=index, timeout=2_000)
+        elif value:
+            select_loc.select_option(value=value, timeout=2_000)
+        elif label:
+            select_loc.select_option(label=label, timeout=2_000)
+        else:
+            return False
+    except Exception:
+        return False
+
+    picked_value, picked_label = _read_selected_sach_cd(select_loc)
+    return _is_selectable_sach_option(picked_value, picked_label)
 
 
 def select_domestic_sach_cd(page, sach_cd_value: str):
     """국내 수기 화면에서 판매채널(sach_cd)을 value 기준으로 선택합니다."""
-    page.wait_for_timeout(1000)
-    select_loc = page.locator('select[name="sach_cd"]').first
-    if select_loc.count() == 0:
-        raise ValueError("select[name='sach_cd'] 요소를 찾지 못했습니다.")
+    page.wait_for_load_state("domcontentloaded")
+    select_loc = _resolve_sach_cd_locator(page)
+    if select_loc is None:
+        raise ValueError(
+            "판매채널(sach_cd) 요소(#sach_cd)를 찾지 못했습니다. "
+            "수기등록 페이지(orderRgst.do)인지 확인해 주세요."
+        )
 
-    picked = select_loc.evaluate(
-        """(el, target) => {
-            const opts = Array.from(el.options || []);
-            if (opts.some(o => o.value === target)) {
-                el.value = target;
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-                return target;
-            }
-            const first = opts.find(o => o.value && o.value.trim() !== '');
-            if (first) {
-                el.value = first.value;
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-                return first.value;
-            }
-            return '';
-        }""",
-        sach_cd_value,
+    try:
+        _wait_sach_cd_options_ready(page, select_loc)
+    except PlaywrightTimeoutError as exc:
+        raise ValueError(
+            "판매채널(sach_cd) 목록이 비어 있거나 로드되지 않았습니다.\n"
+            "  · 주문목록에서 화주가 선택됐는지 확인해 주세요 (메뉴 0번).\n"
+            "  · 화주를 바꾼 뒤 11번을 다시 실행해 주세요."
+        ) from exc
+
+    selectable = _list_selectable_sach_options(select_loc)
+    if not selectable:
+        raise ValueError("sach_cd에서 선택 가능한 판매채널이 없습니다.")
+
+    # 1) CONFIG/env value → 2) J채널 → 3) 첫 항목 (JS 즉시 선택)
+    picked = _select_sach_cd_with_prefs(
+        select_loc,
+        value=sach_cd_value,
+        fallback_label="J채널",
     )
-    if not picked:
-        raise ValueError("sach_cd에서 선택 가능한 option value가 없습니다.")
+    if picked:
+        return
+
+    # select2 등 JS 폴백이 실패한 경우에만 Playwright select_option 시도
+    if _apply_sach_cd_selection(select_loc, value=sach_cd_value):
+        return
+    if _apply_sach_cd_selection(select_loc, label="J채널"):
+        return
+    first = selectable[0]
+    if _apply_sach_cd_selection(select_loc, index=int(first["index"])):
+        return
+
+    picked_value, picked_label = _read_selected_sach_cd(select_loc)
+    raise ValueError(
+        f"sach_cd 선택에 실패했습니다. 현재값='{picked_label}'({picked_value!r})\n"
+        f"  · 후보: {selectable[:8]}"
+    )
 
 
 def _get_product_search_scope(page):
@@ -335,10 +535,11 @@ def wait_until_derived_field_nonempty(page, field_name: str, timeout_ms: int = 1
         page.wait_for_function(js_has_content, arg=field_name, timeout=timeout_ms)
         display_val = page.evaluate(js_read_display, field_name)
         safe = display_val.encode("cp949", errors="replace").decode("cp949")
-    except PlaywrightTimeoutError:
-
-
-        pass
+    except PlaywrightTimeoutError as exc:
+        raise ValueError(
+            f"{field_name} 자동 계산 값이 비어 있습니다. "
+            "단가·수량 입력 후 결제금액이 채워지는지 화면에서 확인해 주세요."
+        ) from exc
 
 
 def fill_field_by_candidates(page, field_names, value: str, required: bool = True):
@@ -629,7 +830,7 @@ def try_select_domestic_dlvr_company(page):
         pass
 
 
-def click_save_button(page, *, confirm_swal: bool = True):
+def click_save_button(page, *, confirm_swal: bool = True, quiet: bool = False):
     """저장 버튼을 클릭합니다."""
     save_btn_candidates = [
         'button:has-text("저장")',
@@ -671,10 +872,11 @@ def click_save_button(page, *, confirm_swal: bool = True):
             popup.first.wait_for(state="visible", timeout=3000)
             print("[주의] 자동으로 '저장'하지 않습니다.")
         except PlaywrightTimeoutError:
-            print(
-                "[안내] 저장 버튼은 클릭했습니다. "
-                "(확인창이 늦게 뜨거나 없을 수 있습니다. 필요하면 화면에서 직접 확인해 주세요.)"
-            )
+            if not quiet:
+                print(
+                    "[안내] 저장 버튼은 클릭했습니다. "
+                    "(확인창이 늦게 뜨거나 없을 수 있습니다. 필요하면 화면에서 직접 확인해 주세요.)"
+                )
 
 
 def fill_domestic_order_detail_fields(
@@ -717,7 +919,7 @@ def fill_domestic_order_detail_fields(
     fill_field_by_candidates(
         page,
         ["recvr_mobile_no_enc", "final_recvr_mobile_no_enc"],
-        rv_tel,
+        rv_mobile,
     )
     fill_field_by_candidates(
         page,
@@ -741,7 +943,7 @@ def run_task(page, context, config, *, keep_browser: bool = False):
     stamp_yymmddhh = now.strftime("%y%m%d%H")
     stamp_mmddhhmm = now.strftime("%m%d%H%M")
 
-    open_domestic_order_register_page(page, config)
+    page = open_domestic_order_register_page(page, config)
     select_domestic_sach_cd(page, config["sach_cd_value"])
     search_and_select_product_in_popup(page, product_cd)
     fill_domestic_order_detail_fields(
@@ -752,7 +954,7 @@ def run_task(page, context, config, *, keep_browser: bool = False):
         stamp_yymmddhh,
     )
     # 저장 후 SweetAlert/알림은 자동으로 누르지 않음 (수동 확인)
-    click_save_button(page, confirm_swal=False)
+    click_save_button(page, confirm_swal=False, quiet=True)
     from Mate2QA_browser_session import (
         MSG_KEEP_BROWSER_AFTER_SAVE,
         wait_enter_after_task,

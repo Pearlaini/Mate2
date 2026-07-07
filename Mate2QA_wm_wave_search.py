@@ -925,20 +925,20 @@ def wait_out_wk_ord_tab4_rows(page: Page, timeout_ms: int = 60_000) -> int:
     return 0
 
 
-def click_out_wk_ord_instruction_tab(page: Page) -> None:
-    """출고상세 그리드 「출고지시」 탭 데이터를 로드합니다."""
+def click_out_instruction_tab(page: Page) -> None:
+    """「출고지시」 탭을 클릭하고 데이터를 로드합니다."""
     page.locator("#out_exec_view").wait_for(state="visible", timeout=15_000)
     tseq_sno = page.locator("#selected_out_alloc_tseq_sno").input_value().strip()
     if not tseq_sno:
         raise ValueError(
             "출고차수 행이 선택되지 않았습니다. "
-            "목록에서 출고차수명 행을 먼저 클릭해 주세요."
+            "출고지시 탭을 열 수 없습니다."
         )
 
     tab = page.locator('a.nav-link[href="#tab_borders_icons-3"]').first
-    if tab.count() and tab.is_visible():
-        tab.click()
-        page.wait_for_timeout(400)
+    tab.wait_for(state="visible", timeout=10_000)
+    tab.click()
+    page.wait_for_timeout(400)
 
     page.evaluate(
         """(sno) => {
@@ -949,7 +949,156 @@ def click_out_wk_ord_instruction_tab(page: Page) -> None:
         tseq_sno,
     )
     page.wait_for_timeout(1000)
-    row_count = _wait_out_wk_ord_tab3_rows(page)
+    page.locator("#tab_borders_icons-3.active").wait_for(
+        state="attached", timeout=10_000
+    )
+
+
+def click_out_picking_tab(page: Page) -> None:
+    """「피킹지시」 탭을 클릭하고 데이터를 로드합니다."""
+    page.locator("#out_exec_view").wait_for(state="visible", timeout=15_000)
+    tseq_sno = page.locator("#selected_out_alloc_tseq_sno").input_value().strip()
+    if not tseq_sno:
+        raise ValueError(
+            "출고차수 행이 선택되지 않았습니다. "
+            "피킹지시 탭을 열 수 없습니다."
+        )
+
+    tab = page.locator('a.nav-link[href="#tab_borders_icons-4"]').first
+    tab.wait_for(state="visible", timeout=10_000)
+    tab.click()
+    page.wait_for_timeout(400)
+
+    page.evaluate(
+        """(sno) => {
+            if (typeof grid_table_tab4 === 'function') {
+                grid_table_tab4(sno, 'ck');
+            }
+        }""",
+        tseq_sno,
+    )
+    page.wait_for_timeout(1000)
+    page.locator("#tab_borders_icons-4.active").wait_for(
+        state="attached", timeout=10_000
+    )
+
+
+def click_out_wk_ord_instruction_tab(page: Page) -> None:
+    """출고상세 그리드 「출고지시」 탭 데이터를 로드합니다."""
+    click_out_instruction_tab(page)
+    _wait_out_wk_ord_tab3_rows(page)
+
+
+def click_packing_instruction_tab(page: Page) -> None:
+    """「포장지시」 탭을 클릭하고 데이터를 로드합니다."""
+    page.locator("#out_exec_view").wait_for(state="visible", timeout=15_000)
+    tseq_sno = page.locator("#selected_out_alloc_tseq_sno").input_value().strip()
+    if not tseq_sno:
+        raise ValueError(
+            "출고차수 행이 선택되지 않았습니다. "
+            "포장지시 탭을 열 수 없습니다."
+        )
+
+    tab = page.locator('a.nav-link[href="#tab_borders_icons-5"]').first
+    tab.wait_for(state="visible", timeout=10_000)
+    tab.click()
+    page.wait_for_timeout(400)
+
+    page.evaluate(
+        """(sno) => {
+            if (typeof grid_table_tab === 'function') {
+                grid_table_tab(sno, 'pk');
+            } else if (typeof grid_table_tab5 === 'function') {
+                grid_table_tab5(sno, 'ck');
+            }
+        }""",
+        tseq_sno,
+    )
+    page.wait_for_timeout(1000)
+    page.locator("#tab_borders_icons-5.tab-pane.active.show").wait_for(
+        state="visible", timeout=10_000
+    )
+
+
+def click_out_confirm_tab(page: Page) -> None:
+    """「출고확정」 탭을 클릭하고 데이터를 로드합니다."""
+    page.locator("#out_exec_view").wait_for(state="visible", timeout=15_000)
+    tseq_sno = page.locator("#selected_out_alloc_tseq_sno").input_value().strip()
+    if not tseq_sno:
+        raise ValueError(
+            "출고차수 행이 선택되지 않았습니다. "
+            "출고확정 탭을 열 수 없습니다."
+        )
+
+    tab = page.locator('a.nav-link[href="#tab_borders_icons-8"]').first
+    tab.wait_for(state="visible", timeout=10_000)
+    tab.click()
+    page.wait_for_timeout(400)
+
+    page.evaluate(
+        """(sno) => {
+            if (typeof grid_table_tab8 === 'function') {
+                grid_table_tab8(sno, 'ck');
+            }
+        }""",
+        tseq_sno,
+    )
+    page.wait_for_timeout(1000)
+    page.locator("#tab_borders_icons-8.active").wait_for(
+        state="attached", timeout=10_000
+    )
+
+
+def click_out_complete_tab(page: Page) -> None:
+    """「출고완료」 탭을 클릭하고 데이터를 로드합니다."""
+    page.locator("#out_exec_view").wait_for(state="visible", timeout=15_000)
+    tseq_sno = page.locator("#selected_out_alloc_tseq_sno").input_value().strip()
+    if not tseq_sno:
+        raise ValueError(
+            "출고차수 행이 선택되지 않았습니다. "
+            "출고완료 탭을 열 수 없습니다."
+        )
+
+    tab = page.locator('a.nav-link[href="#tab_borders_icons-9"]').first
+    tab.wait_for(state="visible", timeout=10_000)
+    tab.click()
+    page.wait_for_timeout(400)
+
+    page.evaluate(
+        """(sno) => {
+            if (typeof grid_table_tab9 === 'function') {
+                grid_table_tab9(sno, 'ck');
+            }
+        }""",
+        tseq_sno,
+    )
+    page.wait_for_timeout(1000)
+    page.locator("#tab_borders_icons-9.active").wait_for(
+        state="attached", timeout=10_000
+    )
+
+
+def ensure_out_wk_ord_row_selected(page: Page) -> None:
+    """출고작업 목록에서 첫 번째 행을 선택해 출고 실행 영역을 엽니다."""
+    try:
+        wait_out_wk_ord_main_grid(page)
+    except OutWkOrdSearchEmptyError as exc:
+        raise ValueError(
+            "출고작업 목록에 검색 결과가 없습니다. "
+            "목록에 출고차수 데이터를 준비해 주세요."
+        ) from exc
+
+    first_row = page.locator("#grid-table .tabulator-row").first
+    first_row.wait_for(state="visible", timeout=10_000)
+    first_row.scroll_into_view_if_needed()
+    first_row.click()
+    page.wait_for_timeout(800)
+    tseq_sno = page.locator("#selected_out_alloc_tseq_sno").input_value().strip()
+    if not tseq_sno:
+        raise ValueError(
+            "출고차수 첫 행 선택 후 #selected_out_alloc_tseq_sno가 비어 있습니다."
+        )
+    page.locator("#out_exec_view").wait_for(state="visible", timeout=15_000)
 
 
 def click_box_recommend_dropdown(page: Page) -> None:

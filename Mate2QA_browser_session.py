@@ -26,9 +26,37 @@ from Mate2QA_site_config import (
 )
 
 MSG_CLOSE_BROWSER = "Enter를 누르시면 팝업창이 닫힙니다."
-MSG_KEEP_BROWSER = "Enter를 누르세요."
+MSG_KEEP_BROWSER = "Enter를 누르시면 화면이 종료됩니다."
+MSG_STOCK_KEEP_BROWSER = (
+    "재고 조회 탭을 확인하신 뒤, 화면을 종료하시려면 Enter를 눌러주세요..."
+)
 MSG_KEEP_BROWSER_AFTER_SAVE = "저장 후 Enter를 누르세요."
 MSG_CLOSE_BROWSER_AFTER_SAVE = "저장 후 Enter를 누르시면 팝업창이 닫힙니다."
+
+
+def apply_task_page_result(session: "BrowserSession", result) -> None:
+    """run_task()가 반환한 Page·탭 목록을 세션에 반영합니다."""
+    pages: list[Page] = []
+    if isinstance(result, Page):
+        pages = [result]
+    elif isinstance(result, (list, tuple)):
+        pages = [p for p in result if isinstance(p, Page)]
+
+    live_pages: list[Page] = []
+    for page in pages:
+        try:
+            if not page.is_closed():
+                live_pages.append(page)
+        except Exception:
+            continue
+
+    if live_pages:
+        session.preserve_pages(*live_pages)
+        session.page = live_pages[-1]
+        try:
+            session.page.bring_to_front()
+        except Exception:
+            pass
 
 
 def wait_enter_after_task(*, keep_browser: bool, message: Optional[str] = None) -> None:
@@ -82,6 +110,7 @@ class BrowserSession:
         self.context: Optional[BrowserContext] = None
         self.page: Optional[Page] = None
         self.config: Optional[Dict] = None
+        self._preserved_page_ids: set[int] = set()
 
     def start(self) -> "BrowserSession":
         """브라우저를 한 번 열고 로그인 상태를 확인합니다."""
@@ -125,12 +154,17 @@ class BrowserSession:
     def restart_if_needed(self) -> None:
         """연결이 끊기거나 탭이 없으면 브라우저를 다시 열고 로그인합니다."""
         if self._is_alive():
-            if (
+            # 살아 있는 브라우저에서 닫힌 탭만 복구 (prepare_for_task와 순환 호출 금지)
+            if self.context and (
                 self.page is None
                 or self.page.is_closed()
                 or not any(not p.is_closed() for p in self.context.pages)
             ):
-                self.prepare_for_task()
+                live_pages = [p for p in self.context.pages if not p.is_closed()]
+                if live_pages:
+                    self.page = live_pages[0]
+                else:
+                    self.page = self.context.new_page()
             return
 
         print("[안내] 브라우저 연결이 끊겨 다시 시작합니다.", flush=True)
@@ -192,11 +226,48 @@ class BrowserSession:
         self.config = merged
         return merged
 
-    def prepare_for_task(self) -> None:
+    def preserve_pages(self, *pages: Page) -> None:
+        """다음 prepare_for_task에서 닫지 않을 탭을 지정합니다."""
+        preserved: set[int] = set()
+        for page in pages:
+            if page is None:
+                continue
+            try:
+                if not page.is_closed():
+                    preserved.add(id(page))
+            except Exception:
+                continue
+        self._preserved_page_ids = preserved
+
+    @staticmethod
+    def _is_closable_extra_page(
+        extra: Page,
+        main: Page,
+        *,
+        preserved_page_ids: Optional[set[int]] = None,
+    ) -> bool:
+        """작업 준비 시 닫아도 되는 추가 탭/창인지 판단합니다."""
+        if extra is main or extra.is_closed():
+            return False
+        if preserved_page_ids and id(extra) in preserved_page_ids:
+            return False
+        try:
+            url = (extra.url or "").strip().lower()
+        except Exception:
+            return False
+        # about:blank — OMS가 URL을 넣기 전 로딩 중일 수 있으므로 유지
+        if url in ("about:blank", ""):
+            return False
+        return True
+
+    def prepare_for_task(self, *, reset_preserved: bool = True) -> None:
         """메인 탭 외 추가 탭을 닫아 다음 작업을 준비합니다."""
         self.restart_if_needed()
         if not self.context:
             return
+
+        if reset_preserved:
+            self._preserved_page_ids = set()
 
         if self.page is None or self.page.is_closed():
             live_pages = [p for p in self.context.pages if not p.is_closed()]
@@ -206,8 +277,11 @@ class BrowserSession:
                 self.page = self.context.new_page()
 
         main = self.page
+        preserved = set(self._preserved_page_ids)
         for extra in list(self.context.pages):
-            if extra is main or extra.is_closed():
+            if not self._is_closable_extra_page(
+                extra, main, preserved_page_ids=preserved
+            ):
                 continue
             try:
                 extra.close()

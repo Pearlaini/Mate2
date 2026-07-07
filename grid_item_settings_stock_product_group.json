@@ -1,0 +1,70 @@
+{
+  "screen": "stock_product_group",
+  "url": "/wm/stock/sach/sachProdGrp.do",
+  "미사용": [],
+  "사용": [
+    {
+      "order": 1,
+      "grid_itm_sno": "2624",
+      "label": "물류센터",
+      "expsr_yn": "Y",
+      "width": 60
+    },
+    {
+      "order": 2,
+      "grid_itm_sno": "2542",
+      "label": "창고",
+      "expsr_yn": "Y",
+      "width": 80
+    },
+    {
+      "order": 3,
+      "grid_itm_sno": "2625",
+      "label": "화주",
+      "expsr_yn": "Y",
+      "width": 100
+    },
+    {
+      "order": 4,
+      "grid_itm_sno": "2543",
+      "label": "상품코드",
+      "expsr_yn": "Y",
+      "width": 180
+    },
+    {
+      "order": 5,
+      "grid_itm_sno": "2544",
+      "label": "업체 품목코드",
+      "expsr_yn": "Y",
+      "width": 160
+    },
+    {
+      "order": 6,
+      "grid_itm_sno": "2665",
+      "label": "포장단위입수량",
+      "expsr_yn": "Y",
+      "width": 130
+    },
+    {
+      "order": 7,
+      "grid_itm_sno": "2545",
+      "label": "상품명",
+      "expsr_yn": "Y",
+      "width": 270
+    },
+    {
+      "order": 8,
+      "grid_itm_sno": "2546",
+      "label": "바코드",
+      "expsr_yn": "Y",
+      "width": 160
+    },
+    {
+      "order": 9,
+      "grid_itm_sno": "2547",
+      "label": "단위",
+      "expsr_yn": "Y",
+      "width": 50
+    }
+  ]
+}
