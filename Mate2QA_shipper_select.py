@@ -377,7 +377,19 @@ def select_shipper_on_page(
 
 
 def read_session_shipper_label_on_page(page, config: Dict) -> str:
-    """이미 열린 브라우저 탭에서 주문목록 화주명을 읽습니다."""
+    """이미 열린 브라우저 탭에서 주문목록 화주명을 읽습니다.
+
+    현재 화면에 화주 드롭다운(공통 헤더)이 있으면 이동 없이 바로 읽어
+    메뉴 표시 때마다 주문목록으로 재이동하던 깜박임을 없앱니다.
+    """
+    try:
+        if page.locator(_SHIPPER_SELECT).count() > 0 and _wait_for_shipper_dropdown(
+            page, timeout_ms=5_000
+        ):
+            return read_current_shipper_label(page)
+    except PlaywrightError:
+        pass
+
     order_list_url = (config.get("order_list_url") or "").strip()
     if not order_list_url:
         return ""

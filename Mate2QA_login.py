@@ -1,6 +1,7 @@
 # QA OMS — 로그인 전용
 
 import os
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Dict, Iterator, Optional
@@ -34,6 +35,16 @@ _Q10_LOGIN_HOST = "qa-kdash-om.shopeasy.co.kr"
 def _login_host(login_url: str) -> str:
     """로그인 URL에서 호스트만 추출합니다."""
     return urlparse(login_url.strip().lower()).netloc
+
+
+def _is_on_page(page, url: str) -> bool:
+    """현재 페이지가 지정 URL(경로 기준)과 같은 화면인지 확인합니다."""
+    try:
+        target_path = urlparse((url or "").strip().lower()).path
+        current_path = urlparse((page.url or "").strip().lower()).path
+        return bool(target_path) and current_path == target_path
+    except Exception:
+        return False
 
 
 def _is_ably_login_url(login_url: str) -> bool:
@@ -263,17 +274,42 @@ def _attach_page_zoom_handlers(context, config: Dict) -> None:
     context.on("page", _on_page)
 
 
+_AUTOMATION_FINGERPRINT_INIT_SCRIPT = """
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+"""
+
+
 def create_context(p, config: Dict, *, state_file: Optional[Path] = None):
     """저장된 세션이 있으면 재사용하고, 없으면 새 컨텍스트를 만듭니다."""
     headless = bool(config.get("headless", False))
+    reduce_fp = bool(config.get("reduce_automation_fingerprint", True))
+    channel = (config.get("browser_channel") or "").strip()
+
     launch_kw: Dict = {
         "headless": headless,
         "slow_mo": config.get("slow_mo", 0),
     }
+    launch_args: list[str] = []
     if config.get("start_maximized", True) and not headless:
-        launch_kw["args"] = ["--start-maximized"]
+        launch_args.append("--start-maximized")
+    if reduce_fp:
+        launch_args.append("--disable-blink-features=AutomationControlled")
+    if launch_args:
+        launch_kw["args"] = launch_args
+    if reduce_fp:
+        launch_kw["ignore_default_args"] = ["--enable-automation"]
 
-    browser = p.chromium.launch(**launch_kw)
+    browser = None
+    if channel:
+        try:
+            browser = p.chromium.launch(channel=channel, **launch_kw)
+        except Exception:
+            print(
+                f"[경고] '{channel}' 브라우저를 열지 못해 기본 Chromium을 사용합니다.",
+                flush=True,
+            )
+    if browser is None:
+        browser = p.chromium.launch(**launch_kw)
 
     ctx_kw: Dict = {}
     if config.get("start_maximized", True) and not headless:
@@ -289,6 +325,9 @@ def create_context(p, config: Dict, *, state_file: Optional[Path] = None):
         ctx_kw["storage_state"] = str(sf)
 
     context = browser.new_context(**ctx_kw)
+
+    if reduce_fp:
+        context.add_init_script(_AUTOMATION_FINGERPRINT_INIT_SCRIPT)
 
     zoom = float(config.get("page_zoom", 1.0))
     if zoom and abs(zoom - 1.0) > 0.001:
@@ -313,6 +352,24 @@ def needs_login(page, login_url: str) -> bool:
     if "error.do" in current:
         return True
     return False
+
+
+def session_expired_on_server(page, config: Dict) -> bool:
+    """화면 이동 없이 서버 세션 만료 여부를 확인합니다.
+
+    쿠키를 공유하는 API 요청으로 주문목록을 호출해 로그인/오류 페이지로
+    리다이렉트되는지 확인합니다 (업무 화면이 떠 있어도 만료를 즉시 감지).
+    """
+    probe_url = (config.get("order_list_url") or "").strip()
+    if not probe_url:
+        return False
+    try:
+        resp = page.request.get(probe_url, timeout=10_000)
+        final_url = (resp.url or "").lower()
+        return "login.do" in final_url or "error.do" in final_url
+    except Exception:
+        # 확인 실패 시에는 기존 URL 기반 판정에 맡깁니다
+        return False
 
 
 def first_visible_locator(page, candidates):
@@ -395,12 +452,158 @@ def do_login(page, config: Dict, creds: Dict[str, str], *, skip_goto: bool = Fal
     pw_loc.click()
     pw_loc.fill("")
     pw_loc.fill(creds["pw"])
-    btn_loc.click()
+
+    login_url = config["login_url"]
+    captcha_present = _detect_human_verification(page)
+    if captcha_present:
+        if not _wait_for_human_verification(page, login_url):
+            raise ValueError(
+                "CAPTCHA 확인 시간이 초과되었습니다. "
+                "브라우저에서 '사람인지 확인하십시오' 체크 후 다시 실행해 주세요."
+            )
+        if needs_login(page, login_url):
+            print(
+                "[알림] CAPTCHA 확인 후 '로그인' 버튼을 직접 눌러 주세요.\n"
+                "       로그인 완료되면 자동으로 다음 단계로 진행합니다.",
+                flush=True,
+            )
+            _wait_for_login_navigation(page, login_url)
+    else:
+        btn_loc.click()
+
     handle_duplicate_login_popup(page)
     try:
         page.wait_for_load_state("networkidle", timeout=20_000)
     except PlaywrightTimeoutError:
         page.wait_for_load_state("domcontentloaded")
+
+
+_CAPTCHA_DETECT_SELECTORS = (
+    "iframe[src*='recaptcha']",
+    "iframe[title*='reCAPTCHA' i]",
+    ".g-recaptcha",
+    "text=사람인지 확인",
+)
+
+_CAPTCHA_TOKEN_READY_SCRIPT = """() => {
+    const el = document.getElementById('g-recaptcha-response');
+    if (!el || !el.value || el.value.length === 0) return false;
+    const body = (document.body && document.body.innerText) || '';
+    if (body.includes('인증에 실패') || body.toLowerCase().includes('verification failed')) {
+        return false;
+    }
+    return true;
+}"""
+
+_CAPTCHA_FAILED_SCRIPT = """() => {
+    const body = (document.body && document.body.innerText) || '';
+    return body.includes('인증에 실패')
+        || body.toLowerCase().includes('verification failed');
+}"""
+
+
+def _detect_human_verification(page) -> bool:
+    """로그인 화면에 reCAPTCHA 등 사람 확인 위젯이 있는지 확인합니다."""
+    for sel in _CAPTCHA_DETECT_SELECTORS:
+        try:
+            loc = page.locator(sel).first
+            if loc.count() > 0 and loc.is_visible():
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _is_captcha_token_ready(page) -> bool:
+    """g-recaptcha-response 토큰이 발급됐고 실패 문구가 없는지 확인합니다."""
+    try:
+        return bool(page.evaluate(_CAPTCHA_TOKEN_READY_SCRIPT))
+    except Exception:
+        return False
+
+
+def _is_captcha_failed_visible(page) -> bool:
+    """화면에 CAPTCHA 인증 실패 문구가 보이는지 확인합니다."""
+    try:
+        return bool(page.evaluate(_CAPTCHA_FAILED_SCRIPT))
+    except Exception:
+        return False
+
+
+def _wait_for_login_navigation(page, login_url: str, timeout_ms: int = 240_000) -> None:
+    """로그인 페이지(login.do)에서 벗어날 때까지 대기합니다 (수동 로그인 완료)."""
+    try:
+        page.wait_for_function(
+            "() => !window.location.href.toLowerCase().includes('login.do')",
+            timeout=timeout_ms,
+        )
+    except PlaywrightTimeoutError as exc:
+        raise ValueError(
+            f"{timeout_ms // 1000}초 동안 로그인 완료를 확인하지 못했습니다. "
+            "브라우저에서 '로그인' 버튼을 눌렀는지 확인해 주세요."
+        ) from exc
+    try:
+        page.wait_for_load_state("domcontentloaded", timeout=15_000)
+    except PlaywrightTimeoutError:
+        pass
+
+
+def _wait_for_human_verification(
+    page,
+    login_url: str,
+    timeout_ms: int = 240_000,
+) -> bool:
+    """reCAPTCHA가 있으면 사람이 직접 체크할 때까지 기다립니다.
+
+    자동화가 CAPTCHA를 대신 풀지는 않습니다. 토큰 발급·실패·재시도를 감지하고,
+    토큰 없이는 False를 반환해 로그인 버튼 자동 클릭을 막습니다.
+    """
+    if not _detect_human_verification(page):
+        return True
+
+    print(
+        "[알림] reCAPTCHA가 감지되었습니다. 브라우저 창에서 "
+        "'사람인지 확인하십시오' 체크박스를 직접 클릭해 주세요...",
+        flush=True,
+    )
+
+    warned_failure = False
+    deadline = time.monotonic() + timeout_ms / 1000
+    poll_ms = 500
+
+    while time.monotonic() < deadline:
+
+        if not needs_login(page, login_url):
+            print("[알림] 로그인 완료를 확인했습니다.", flush=True)
+            return True
+
+        if _is_captcha_token_ready(page):
+            page.wait_for_timeout(1500)
+            if _is_captcha_token_ready(page):
+                print("[알림] CAPTCHA 확인 완료. 로그인을 계속 진행합니다.", flush=True)
+                return True
+
+        if _is_captcha_failed_visible(page):
+            if not warned_failure:
+                print(
+                    "[경고] CAPTCHA 인증 실패. 체크박스를 다시 눌러 주세요.",
+                    flush=True,
+                )
+                warned_failure = True
+
+        page.wait_for_timeout(poll_ms)
+
+    print(
+        f"[경고] {timeout_ms // 1000}초 동안 CAPTCHA 확인이 되지 않았습니다. "
+        "로그인을 중단합니다.",
+        flush=True,
+    )
+    return False
+
+
+def _wait_for_recaptcha_solved(page, timeout_ms: int = 240_000) -> None:
+    """하위 호환용 — _wait_for_human_verification 래퍼."""
+    _wait_for_human_verification(page, "", timeout_ms=timeout_ms)
 
 
 def handle_duplicate_login_popup(page):
@@ -434,8 +637,10 @@ def apply_env_shipper_after_login(
     if not order_list_url:
         return
 
-    page.goto(order_list_url, wait_until="domcontentloaded")
-    page.wait_for_timeout(500)
+    # 이미 주문목록 화면이면 다시 이동하지 않습니다 (깜박임 방지)
+    if not _is_on_page(page, order_list_url):
+        page.goto(order_list_url, wait_until="domcontentloaded")
+        page.wait_for_timeout(500)
     select_shipper_on_page(
         page,
         config,
@@ -463,12 +668,19 @@ def ensure_login_only(
     config = refresh_config_from_env(config)
     creds = load_env_credentials(config["login_url"])
     sf = state_file if state_file is not None else STATE_FILE
-    page.goto(config["login_url"], wait_until="domcontentloaded")
+
+    # 주문목록으로 바로 이동해 로그인 여부를 확인합니다.
+    # (기존: login.do → 메인 리다이렉트 → 주문목록 순 3회 이동 → 화면 깜박임 원인)
+    order_list_url = (config.get("order_list_url") or "").strip()
+    first_url = order_list_url or config["login_url"]
+    page.goto(first_url, wait_until="domcontentloaded")
 
     if needs_login(page, config["login_url"]):
         on_login = is_login_page(page, config["login_url"])
         do_login(page, config, creds, skip_goto=on_login)
         context.storage_state(path=str(sf))
+        if order_list_url and not _is_on_page(page, order_list_url):
+            page.goto(order_list_url, wait_until="domcontentloaded")
 
     apply_page_zoom(page, config)
     apply_env_shipper_after_login(page, context, config, state_file=sf)

@@ -17,6 +17,7 @@ from Mate2QA_login import (
     ensure_login_only,
     load_env_credentials,
     needs_login,
+    session_expired_on_server,
 )
 from Mate2QA_site_config import (
     CONFIG,
@@ -212,7 +213,9 @@ class BrowserSession:
         merged = refresh_config_from_env(config or self.config)
         creds = load_env_credentials(merged["login_url"])
 
-        if needs_login(self.page, merged["login_url"]):
+        if needs_login(self.page, merged["login_url"]) or session_expired_on_server(
+            self.page, merged
+        ):
             merged = ensure_login_only(
                 self.page,
                 self.context,

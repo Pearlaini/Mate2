@@ -395,6 +395,10 @@ def build_playwright_config(login_url: Optional[str] = None) -> Dict:
         # 주소/모달 팝업 구간만 1.0 (팝업 클릭·backdrop 오류 방지)
         "page_zoom_popup": 1.0,
 
+        # reCAPTCHA 등 봇 감지 완화: 설치된 Chrome 우선 사용
+        "browser_channel": "chrome",
+        "reduce_automation_fingerprint": True,
+
         "selectors": _login_selectors_for_url(resolved_login),
 
     }
