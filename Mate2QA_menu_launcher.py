@@ -5,6 +5,7 @@
 import importlib
 import traceback
 from typing import Optional
+from urllib.parse import urlparse
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import Error as PlaywrightError
@@ -24,7 +25,11 @@ from Mate2QA_shipper_select import (
     change_session_shipper_on_page,
     probe_session_shipper_label,
 )
-from Mate2QA_site_config import refresh_config_from_env
+from Mate2QA_site_config import (
+    IGFC_LOGIN_HOST,
+    _resolve_login_url,
+    refresh_config_from_env,
+)
 from Mate2QA_menu_nav import (
     LauncherExit,
     MAIN_MENU_EXIT,
@@ -382,11 +387,19 @@ def run_item_settings_submenu(session: BrowserSession) -> None:
             )
 
 
+def _is_igfc_site() -> bool:
+    """현재 로그인 URL 호스트가 igfc 사이트인지 확인합니다."""
+    host = urlparse(_resolve_login_url().strip().lower()).netloc
+    return host == IGFC_LOGIN_HOST
+
+
 def resolve_task_module(choice: str) -> str | None:
     """입력 번호에 따라 실행할 모듈 이름을 반환합니다."""
     if choice in _PENDING_CHOICES:
         print("[안내] 해당 메뉴는 아직 준비 중입니다.")
         return None
+    if choice == "12" and _is_igfc_site():
+        return "Mate2QA_AddOverseasOrderForm_Igfc"
     return _COMMON_TASKS.get(choice)
 
 

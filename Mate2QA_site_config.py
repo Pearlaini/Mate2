@@ -37,6 +37,11 @@ _DEFAULT_OMS_SCHEME = "https"
 _DEFAULT_OMS_HOST = "qa-oms.ourbox.co.kr"
 LOGIN_PATH = "/om/login/login.do"
 
+# 사이트별 호스트 (ID/PW env 접두어·로그인 셀렉터·경로 오버라이드가 모두 이 값들을 기준으로 분기)
+ABLY_LOGIN_HOST = "qa-style.ourbox.co.kr"
+Q10_LOGIN_HOST = "qa-kdash-om.shopeasy.co.kr"
+IGFC_LOGIN_HOST = "qa-oms.i-gfc.co.kr"
+
 
 # 로그인 URL의 호스트(scheme://host) 뒤에 붙이는 경로
 
@@ -73,15 +78,34 @@ ITEM_TRNSF_LIST_PATH = "/wm/stock/trnsf/itemTrnsfList.do"
 STOCK_ADJ_LIST_PATH = "/wm/stock/adj/adjList.do"
 
 
+# 사이트별 경로 오버라이드 — igfc는 국내/해외 화면이 물리적으로 분리돼 있어
+# 공통 경로(예: ORDER_LIST_PATH)와 실제 주소가 다르다. 다른 사이트에서 새로
+# 404가 확인되면 이 테이블에 한 줄만 추가하면 된다.
+_SITE_PATH_OVERRIDES: Dict[str, Dict[str, str]] = {
+    IGFC_LOGIN_HOST: {
+        ORDER_LIST_PATH: "/om/order/order/dome/orderList.do",
+        ORDER_REGISTER_PATH: "/om/order/order/dome/orderRgst.do",
+        INTL_ORDER_LIST_PATH: "/om/order/order/intl/orderList.do",
+    },
+}
+
+
 def join_origin_path(login_url: str, path: str) -> str:
 
-    """로그인 URL과 같은 호스트에 path를 이어 붙입니다. path는 / 로 시작."""
+    """로그인 URL과 같은 호스트에 path를 이어 붙입니다. path는 / 로 시작.
+
+    호스트가 _SITE_PATH_OVERRIDES에 있으면 공통 경로 대신 그 사이트 전용 경로를 씁니다.
+    """
 
     parsed = urlparse(login_url)
 
     if not parsed.scheme or not parsed.netloc:
 
         raise ValueError(f"유효하지 않은 login_url: {login_url}")
+
+    host = parsed.netloc.strip().lower()
+
+    path = _SITE_PATH_OVERRIDES.get(host, {}).get(path, path)
 
     if not path.startswith("/"):
 
@@ -291,7 +315,7 @@ def get_stock_adj_list_url(login_url: str = LOGIN_URL) -> str:
 def _login_selectors_for_url(login_url: str) -> Dict[str, str]:
     """사이트별 로그인 폼 셀렉터 (Ably·큐텐-칸닷슈는 loginId/password)."""
     host = urlparse(login_url.strip().lower()).netloc
-    if host in ("qa-style.ourbox.co.kr", "qa-kdash-om.shopeasy.co.kr"):
+    if host in (ABLY_LOGIN_HOST, Q10_LOGIN_HOST):
         return {
             "login_id_input": 'input[name="loginId"]',
             "login_pw_input": 'input[name="password"]',

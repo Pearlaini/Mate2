@@ -15,8 +15,11 @@ from playwright.sync_api import (
 )
 
 from Mate2QA_site_config import (
+    ABLY_LOGIN_HOST as _ABLY_LOGIN_HOST,
     CONFIG,
+    IGFC_LOGIN_HOST as _IGFC_LOGIN_HOST,
     PROJECT_DIR,
+    Q10_LOGIN_HOST as _Q10_LOGIN_HOST,
     STATE_FILE_DEFAULT,
     _ENV_PATH,
     _resolve_login_url,
@@ -25,11 +28,14 @@ from Mate2QA_site_config import (
 
 STATE_FILE = STATE_FILE_DEFAULT
 
-# 기본 로그인: qa-oms.ourbox.co.kr (ID/PW)
-# Ably 전용: qa-style.ourbox.co.kr (AblyID/AblyPW)
-# 큐텐-칸닷슈 QA: qa-kdash-om.shopeasy.co.kr (Q10ID/Q10PW)
-_ABLY_LOGIN_HOST = "qa-style.ourbox.co.kr"
-_Q10_LOGIN_HOST = "qa-kdash-om.shopeasy.co.kr"
+# 기본 로그인: qa-oms.ourbox.co.kr (ID/PW, 접두어 없음)
+# 사이트별 env 키 접두어 — 새 사이트 추가 시 이 표에 한 줄만 추가하면
+# ID/PW/SHIPPER_LABEL/SACH_CD_VALUE 조회가 전부 해당 접두어를 씁니다.
+_SITE_ENV_PREFIX_BY_HOST: Dict[str, str] = {
+    _ABLY_LOGIN_HOST: "Ably",
+    _Q10_LOGIN_HOST: "Q10",
+    _IGFC_LOGIN_HOST: "Igfc",
+}
 
 
 def _login_host(login_url: str) -> str:
@@ -52,36 +58,26 @@ def _is_ably_login_url(login_url: str) -> bool:
     return _login_host(login_url) == _ABLY_LOGIN_HOST
 
 
-def _is_q10_login_url(login_url: str) -> bool:
-    """큐텐-칸닷슈 QA 사이트 로그인 URL인지 확인합니다."""
-    return _login_host(login_url) == _Q10_LOGIN_HOST
+def _resolve_site_env_prefix(login_url: str) -> str:
+    """로그인 URL 호스트에 대응하는 env 키 접두어를 반환합니다. 매칭 없으면 빈 문자열(기본 사이트)."""
+    return _SITE_ENV_PREFIX_BY_HOST.get(_login_host(login_url), "")
 
 
 def _resolve_credential_keys(login_url: str) -> tuple[str, str, str]:
     """로그인 URL에 맞는 env 키(ID, PW, 표시용 라벨)를 반환합니다."""
-    if _is_ably_login_url(login_url):
-        return "AblyID", "AblyPW", "AblyID"
-    if _is_q10_login_url(login_url):
-        return "Q10ID", "Q10PW", "Q10ID"
-    return "ID", "PW", "ID"
+    prefix = _resolve_site_env_prefix(login_url)
+    id_key = f"{prefix}ID"
+    return id_key, f"{prefix}PW", id_key
 
 
 def _resolve_shipper_env_key(login_url: str) -> str:
     """로그인 URL에 맞는 화주 env 키를 반환합니다."""
-    if _is_ably_login_url(login_url):
-        return "AblySHIPPER_LABEL"
-    if _is_q10_login_url(login_url):
-        return "Q10SHIPPER_LABEL"
-    return "SHIPPER_LABEL"
+    return f"{_resolve_site_env_prefix(login_url)}SHIPPER_LABEL"
 
 
 def _resolve_sach_cd_env_key(login_url: str) -> str:
     """로그인 URL에 맞는 판매채널 value env 키를 반환합니다."""
-    if _is_ably_login_url(login_url):
-        return "AblySACH_CD_VALUE"
-    if _is_q10_login_url(login_url):
-        return "Q10SACH_CD_VALUE"
-    return "SACH_CD_VALUE"
+    return f"{_resolve_site_env_prefix(login_url)}SACH_CD_VALUE"
 
 
 def _reload_login_env() -> None:
